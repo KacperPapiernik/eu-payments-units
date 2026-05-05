@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  payments-api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://payments_user:payments_pass@db:5432/payments_db
+      - DATABASE_URL_SYNC=postgresql://payments_user:payments_pass@db:5432/payments_db
+    depends_on:
+      - db
+    volumes:
+      - ./app:/app/app
+
+  worker:
+    build: .
+    command: python worker.py
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://payments_user:payments_pass@db:5432/payments_db
+      - DATABASE_URL_SYNC=postgresql://payments_user:payments_pass@db:5432/payments_db
+    depends_on:
+      - db
+
+  db:
+    image: postgres:15
+    environment:
+      - POSTGRES_USER=payments_user
+      - POSTGRES_PASSWORD=payments_pass
+      - POSTGRES_DB=payments_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
