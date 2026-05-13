@@ -1,0 +1,177 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: payment_infra_postgres
+    environment:
+      POSTGRES_USER: payments
+      POSTGRES_PASSWORD: payments_secret
+      POSTGRES_DB: payments
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - payment_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U payments -d payments"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: payment_infra_redis
+    ports:
+      - "6379:6379"
+    networks:
+      - payment_network
+
+  target_service:
+    build:
+      context: .
+      dockerfile: Dockerfile.target
+    container_name: target_service
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://payments:payments_secret@postgres:5432/payments
+      - REDIS_URL=redis://redis:6379/0
+      - SERVICE_NAME=target
+      - CA_CERT_PATH=/certs/ca.pem
+      - SERVICE_CERT_PATH=/certs/target.pem
+      - SERVICE_KEY_PATH=/certs/target.key
+      - HOST=0.0.0.0
+      - PORT=8001
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./certs:/certs:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - payment_network
+
+  sepa_batch_service:
+    build:
+      context: .
+      dockerfile: Dockerfile.sepa_batch
+    container_name: sepa_batch_service
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://payments:payments_secret@postgres:5432/payments
+      - REDIS_URL=redis://redis:6379/1
+      - SERVICE_NAME=sepa_batch
+      - TARGET_URL=https://target_service:8001
+      - CA_CERT_PATH=/certs/ca.pem
+      - SERVICE_CERT_PATH=/certs/sepa_batch.pem
+      - SERVICE_KEY_PATH=/certs/sepa_batch.key
+      - HOST=0.0.0.0
+      - PORT=8002
+      - SESSION_CLOSE_INTERVAL=300
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./certs:/certs:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      target_service:
+        condition: service_started
+    networks:
+      - payment_network
+
+  sepa_instant_service:
+    build:
+      context: .
+      dockerfile: Dockerfile.sepa_instant
+    container_name: sepa_instant_service
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://payments:payments_secret@postgres:5432/payments
+      - REDIS_URL=redis://redis:6379/2
+      - SERVICE_NAME=sepa_instant
+      - TARGET_URL=https://target_service:8001
+      - CA_CERT_PATH=/certs/ca.pem
+      - SERVICE_CERT_PATH=/certs/sepa_instant.pem
+      - SERVICE_KEY_PATH=/certs/sepa_instant.key
+      - HOST=0.0.0.0
+      - PORT=8003
+    ports:
+      - "8003:8003"
+    volumes:
+      - ./certs:/certs:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      target_service:
+        condition: service_started
+    networks:
+      - payment_network
+
+  sepa_batch_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.sepa_batch
+    container_name: sepa_batch_worker
+    environment:
+      - PYTHONPATH=/app
+      - DATABASE_URL=postgresql+asyncpg://payments:payments_secret@postgres:5432/payments
+      - REDIS_URL=redis://redis:6379/1
+      - SERVICE_NAME=sepa_batch
+      - TARGET_URL=https://target_service:8001
+      - CA_CERT_PATH=/certs/ca.pem
+      - SERVICE_CERT_PATH=/certs/sepa_batch.pem
+      - SERVICE_KEY_PATH=/certs/sepa_batch.key
+      - SESSION_CLOSE_INTERVAL=300
+    command: celery -A sepa_batch_service.app.workers worker -l info --pool=solo --hostname=sepa_batch_worker
+    volumes:
+      - ./certs:/certs:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      target_service:
+        condition: service_started
+    networks:
+      - payment_network
+
+  sepa_instant_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.sepa_instant
+    container_name: sepa_instant_worker
+    environment:
+      - PYTHONPATH=/app
+      - DATABASE_URL=postgresql+asyncpg://payments:payments_secret@postgres:5432/payments
+      - REDIS_URL=redis://redis:6379/2
+      - SERVICE_NAME=sepa_instant
+      - TARGET_URL=https://target_service:8001
+      - CA_CERT_PATH=/certs/ca.pem
+      - SERVICE_CERT_PATH=/certs/sepa_instant.pem
+      - SERVICE_KEY_PATH=/certs/sepa_instant.key
+    command: celery -A sepa_instant_service.app.workers worker -l info --pool=solo --hostname=sepa_instant_worker
+    volumes:
+      - ./certs:/certs:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      target_service:
+        condition: service_started
+    networks:
+      - payment_network
+
+volumes:
+  postgres_data:
+
+networks:
+  payment_network:
+    driver: bridge
