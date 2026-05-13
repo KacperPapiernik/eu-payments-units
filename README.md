@@ -270,6 +270,7 @@ audit_logger.log_transfer_settled(transfer_id, bank_bic, amount)
 ### 1. Generowanie certyfikatów
 
 ```bash
+python -m pip install cryptography
 python certs/generate_certs.py
 ```
 
