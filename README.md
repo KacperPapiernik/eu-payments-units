@@ -2,6 +2,408 @@
 
 Symulacja europejskiej infrastruktury płatności obejmującej TARGET (RTGS), SEPA Batch (clearing + netting) oraz SEPA Instant (płatności w czasie rzeczywistym).
 
+## Pierwsze kroki
+
+### 1. Generowanie certyfikatów
+
+```bash
+python -m pip install cryptography
+python certs/generate_certs.py
+```
+
+### 2. Uruchomienie serwisów
+
+```bash
+docker-compose up --build
+```
+
+### 3. Dostęp do serwisów i dokumentacji api
+
+- TARGET: http://localhost:8001
+- SEPA Batch: http://localhost:8002
+- SEPA Instant: http://localhost:8003
+
+Api:
+
+- http://localhost:8001/docs
+- http://localhost:8002/docs
+- http://localhost:8003/docs
+
+### 4. Workery (uruchamiane automatycznie w Docker)
+
+- SEPA Batch Worker: zamyka sesje co 5 min, wykonuje netting
+- SEPA Instant Worker: rozwiązuje zatory co 1 min, monitoruje płynność
+
+Możliwe opcje pracy workera:
+
+{
+"mode": "fixed_times",
+"times": [
+"05:30",
+"08:15",
+"10:45",
+"13:15",
+"15:15"
+]
+}
+
+{
+"mode": "interval",
+"interval_minutes": 5
+}
+
+---
+
+## Pełny scenariusz testowy
+
+Ten przewodnik pokazuje jak przetestować cały system SEPA od zera.
+
+### Wymagania wstępne
+
+1. Uruchom wszystkie serwisy:
+
+   ```bash
+   docker-compose up
+   ```
+
+   Poczekaj aż zobaczysz "ready" dla wszystkich serwisów (5-10 sekund).
+
+2. Przygotuj dwa banki ( BANKPLPW i BANKDEXX ) - zarejestruj je według kroków poniżej.
+
+---
+
+### Krok 1: Utworzenie banków
+
+```bash
+# Bank Polski
+curl -X POST http://localhost:8001/banks \
+  -H "Content-Type: application/json" \
+  -d '{"bic": "BANKPLPW", "name": "Bank Polski"}'
+
+# Deutsche Bank
+curl -X POST http://localhost:8001/banks \
+  -H "Content-Type: application/json" \
+  -d '{"bic": "BANKDEXX", "name": "Deutsche Bank"}'
+```
+
+**Co się dzieje:** TARGET tworzy bank i automatycznie zakłada mu konto rozliczeniowe z saldem 0.
+
+**Weryfikacja:**
+
+```bash
+curl http://localhost:8001/banks
+```
+
+---
+
+### Krok 2: Wstrzyknięcie płynności
+
+Bez tego kroku żaden transfer się nie powiedzie - bank musi mieć środki na koncie!
+
+```bash
+# 1 000 000 EUR dla Banku Polskiego
+curl -X POST http://localhost:8001/liquidity/injection \
+  -H "Content-Type: application/json" \
+  -d '{"bank_bic": "BANKPLPW", "amount": 1000000.00, "currency": "EUR"}'
+
+# 500 000 EUR dla Deutsche Bank
+curl -X POST http://localhost:8001/liquidity/injection \
+  -H "Content-Type: application/json" \
+  -d '{"bank_bic": "BANKDEXX", "amount": 500000.00, "currency": "EUR"}'
+```
+
+**Co się dzieje:** Operator (centralny bank) dodaje środki na konta rozliczeniowe banków.
+
+**Weryfikacja:**
+
+```bash
+curl http://localhost:8001/banks/BANKPLPW
+# Sprawdź pole "balance" - powinno być 1000000.00
+```
+
+---
+
+### Krok 3: SEPA Instant Transfer (rozliczenie natychmiastowe)
+
+```bash
+curl -X POST http://localhost:8003/transfers/xml \
+  -H "Content-Type: application/xml" \
+  -d '
+<Document>
+  <CstmrCdtTrfInitn>
+
+    <PmtId>
+      <EndToEndId>INST-1001</EndToEndId>
+    </PmtId>
+
+    <Amt>
+      <InstdAmt Ccy="EUR">100.00</InstdAmt>
+    </Amt>
+
+    <DbtrAcct>
+      <Id>
+        <IBAN>PL61109010140000071219812874</IBAN>
+      </Id>
+    </DbtrAcct>
+
+    <CdtrAcct>
+      <Id>
+        <IBAN>DE89370400440532013000</IBAN>
+      </Id>
+    </CdtrAcct>
+
+    <DbtrAgt>
+      <FinInstnId>
+        <BIC>BANKPLPW</BIC>
+      </FinInstnId>
+    </DbtrAgt>
+
+    <CdtrAgt>
+      <FinInstnId>
+        <BIC>BANKDEXX</BIC>
+      </FinInstnId>
+    </CdtrAgt>
+
+    <RmtInf>
+      <Ustrd>Instant transfer</Ustrd>
+    </RmtInf>
+
+  </CstmrCdtTrfInitn>
+</Document>'
+```
+
+**Co się dzieje:**
+
+- SEPA Instant NATYCHMIAST wysyła żądanie do TARGET `/settle/payment`
+- Rozliczenie trwa ~1-2 sekundy
+- Salda obu banków aktualizują się automatycznie
+
+**Możliwe odpowiedzi:**
+
+- ✅ `{"status": "settled", ...}` - transfer wykonany
+- ❌ `{"detail": "Insufficient funds"}` - brak środków (powtórz Krok 2)
+
+**Weryfikacja salda:**
+
+```bash
+curl http://localhost:8001/banks/BANKPLPW
+curl http://localhost:8001/banks/BANKDEXX
+```
+
+---
+
+### Krok 4: SEPA Batch Transfer (kolejkowanie)
+
+```bash
+curl -X POST http://localhost:8003/transfers/xml \
+  -H "Content-Type: application/xml" \
+  -d '
+<Document>
+  <CstmrCdtTrfInitn>
+
+    <PmtId>
+      <EndToEndId>INST-1001</EndToEndId>
+    </PmtId>
+
+    <Amt>
+      <InstdAmt Ccy="EUR">100.00</InstdAmt>
+    </Amt>
+
+    <DbtrAcct>
+      <Id>
+        <IBAN>PL61109010140000071219812874</IBAN>
+      </Id>
+    </DbtrAcct>
+
+    <CdtrAcct>
+      <Id>
+        <IBAN>DE89370400440532013000</IBAN>
+      </Id>
+    </CdtrAcct>
+
+    <DbtrAgt>
+      <FinInstnId>
+        <BIC>BANKPLPW</BIC>
+      </FinInstnId>
+    </DbtrAgt>
+
+    <CdtrAgt>
+      <FinInstnId>
+        <BIC>BANKDEXX</BIC>
+      </FinInstnId>
+    </CdtrAgt>
+
+    <RmtInf>
+      <Ustrd>Instant transfer</Ustrd>
+    </RmtInf>
+
+  </CstmrCdtTrfInitn>
+</Document>'
+```
+
+**Co się dzieje:**
+
+- Transfer NIE jest od razu rozliczany
+- Idzie do kolejki z statusem `QUEUED`
+- Czeka na zamknięcie sesji
+
+**Weryfikacja - sprawdź sesję:**
+
+```bash
+curl http://localhost:8002/sessions
+```
+
+Odpowiedź zawiera `session_id` - zapamiętaj go.
+
+---
+
+### Krok 5: Batch Transfer - wiele transakcji + netting
+
+Dodaj więcej transferów (w obie strony dla demonstracji nettingu):
+
+```bash
+# Transfer A → B
+curl -X POST http://localhost:8002/transfers/xml \
+  -H "Content-Type: application/xml" \
+  -d '
+<Document>
+  <CstmrCdtTrfInitn>
+
+    <PmtId>
+      <EndToEndId>BATCH-5001</EndToEndId>
+    </PmtId>
+
+    <Amt>
+      <InstdAmt Ccy="EUR">500.00</InstdAmt>
+    </Amt>
+
+    <DbtrAcct>
+      <Id>
+        <IBAN>PL61109010140000071219812874</IBAN>
+      </Id>
+    </DbtrAcct>
+
+    <CdtrAcct>
+      <Id>
+        <IBAN>DE89370400440532013000</IBAN>
+      </Id>
+    </CdtrAcct>
+
+    <DbtrAgt>
+      <FinInstnId>
+        <BIC>BANKPLPW</BIC>
+      </FinInstnId>
+    </DbtrAgt>
+
+    <CdtrAgt>
+      <FinInstnId>
+        <BIC>BANKDEXX</BIC>
+      </FinInstnId>
+    </CdtrAgt>
+
+  </CstmrCdtTrfInitn>
+</Document>'
+
+# Transfer B → A
+curl -X POST http://localhost:8002/transfers/xml \
+  -H "Content-Type: application/xml" \
+  -d '
+<Document>
+  <CstmrCdtTrfInitn>
+
+    <PmtId>
+      <EndToEndId>BATCH-5002</EndToEndId>
+    </PmtId>
+
+    <Amt>
+      <InstdAmt Ccy="EUR">200.00</InstdAmt>
+    </Amt>
+
+    <DbtrAcct>
+      <Id>
+        <IBAN>DE89370400440532013000</IBAN>
+      </Id>
+    </DbtrAcct>
+
+    <CdtrAcct>
+      <Id>
+        <IBAN>PL61109010140000071219812874</IBAN>
+      </Id>
+    </CdtrAcct>
+
+    <DbtrAgt>
+      <FinInstnId>
+        <BIC>BANKDEXX</BIC>
+      </FinInstnId>
+    </DbtrAgt>
+
+    <CdtrAgt>
+      <FinInstnId>
+        <BIC>BANKPLPW</BIC>
+      </FinInstnId>
+    </CdtrAgt>
+
+  </CstmrCdtTrfInitn>
+</Document>'
+```
+
+**Co to jest netting?**
+Zamiast 2 osobnych rozliczeń (1000 + 200), system policzy NETTO:
+
+- BankPLPW płaci BankDEXX: 500 - 200 = **300 EUR** (tylko jedno rozliczenie)
+
+---
+
+### Krok 6: Zamknięcie sesji i rozliczenie
+
+**Opcja A - Ręcznie (natychmiast):**
+
+```bash
+curl -X POST http://localhost:8002/sessions/close/{session_id}
+```
+
+Zamień `{session_id}` na ID z Kroku 4.
+
+**Opcja B - Automatycznie (po 5 minutach):**
+Celem nie jest ręczne zamykanie - **worker robi to automatycznie** co 5 minut (SESSION_CLOSE_INTERVAL=300).
+
+**Co się dzieje przy zamknięciu:**
+
+1. Worker pobiera wszystkie transfery z sesji
+2. Liczy netting (sumuje credits/debits per bank)
+3. Wysyła do TARGET TYLKO jedno rozliczenie netto
+4. Status sesji zmienia się na `CLOSED`
+5. Status transferów zmienia się na `PROCESSED`
+
+**Weryfikacja:**
+
+```bash
+# Stan sesji
+curl http://localhost:8002/sessions/{session_id}
+
+# Stan kont po rozliczeniu
+curl http://localhost:8001/banks/BANKPLPW
+curl http://localhost:8001/banks/BANKDEXX
+```
+
+---
+
+### Krok 7: Automatyczne retry (SEPA Instant)
+
+Jeśli przelew instant nie mógł być wykonany (brak środków), worker automatycznie:
+
+1. Co **1 minutę** sprawdza kolejkę `PendingTransferQueue`
+2. Retry do TARGET `/settle/payment`
+3. Jeśli środki już są → transfer się wykonuje
+
+**Jak sprawdzić pending transfery:**
+
+```bash
+curl http://localhost:8003/transfers
+```
+
+---
+
 ## Serwisy
 
 ### TARGET Service (Port 8001)
@@ -29,7 +431,7 @@ Symulacja europejskiej infrastruktury płatności obejmującej TARGET (RTGS), SE
   - Multilateral netting (netowanie wielostronne)
   - Okresowe rozliczenia z TARGET
 - **Endpointy**:
-  - `POST /transfers` - Złożenie pojedynczego przelewu
+  - `POST /transfers/xml` - Złożenie pojedynczego przelewu
   - `POST /transfers/batch` - Złożenie paczki przelewów
   - `GET /sessions` - Lista sesji
   - `POST /sessions/close/{session_id}` - Zamknięcie sesji
@@ -44,7 +446,7 @@ Symulacja europejskiej infrastruktury płatności obejmującej TARGET (RTGS), SE
   - Monitoring płynności
   - Auto-blokada po 2h braku płynności
 - **Endpointy**:
-  - `POST /transfers` - Złożenie przelewu instant
+  - `POST /transfers/xml` - Złożenie przelewu instant
   - `GET /transfers/{id}` - Status przelewu
   - `GET /transfers` - Lista przelewów
 - **Workery**: Celery worker rozwiązuje zaległe transfery i monitoruje alerty
@@ -227,296 +629,6 @@ Dotyczy:
 
 ---
 
-### 5. Audit Logging
-
-Każdy serwis loguje zdarzenia biznesowe w formacie JSON:
-
-```json
-{
-  "timestamp": "2024-01-15T10:30:00Z",
-  "service": "target",
-  "event_type": "transfer_settled",
-  "bank_bic": "BANKPLPW",
-  "amount": 100.00,
-  "reference": "tx-123-456",
-  "details": {...}
-}
-```
-
-**Logowane zdarzenia:**
-
-- `transfer_received` - przelew otrzymany
-- `transfer_settled` - przelew rozliczony
-- `transfer_rejected` - przelew odrzucony
-- `bank_blocked` - bank zablokowany
-- `bank_unblocked` - bank odblokowany
-- `liquidity_injected` - płynność wstrzyknięta
-- `session_opened` - sesja otwarta
-- `session_closed` - sesja zamknięta
-- `gridlock_detected` - wykryto zator
-- `gridlock_resolved` - zator rozwiązany
-
-Implementacja w `shared/security/audit.py`:
-
-```python
-audit_logger = create_audit_logger("target")
-audit_logger.log_transfer_settled(transfer_id, bank_bic, amount)
-```
-
----
-
-## Pierwsze kroki
-
-### 1. Generowanie certyfikatów
-
-```bash
-python -m pip install cryptography
-python certs/generate_certs.py
-```
-
-### 2. Uruchomienie serwisów
-
-```bash
-docker-compose up --build
-```
-
-### 3. Dostęp do serwisów
-
-- TARGET: https://localhost:8001
-- SEPA Batch: https://localhost:8002
-- SEPA Instant: https://localhost:8003
-
-### 4. Workery (uruchamiane automatycznie w Docker)
-
-- SEPA Batch Worker: zamyka sesje co 5 min, wykonuje netting
-- SEPA Instant Worker: rozwiązuje zatory co 1 min, monitoruje płynność
-
----
-
-## Pełny scenariusz testowy
-
-Ten przewodnik pokazuje jak przetestować cały system SEPA od zera.
-
-### Wymagania wstępne
-
-1. Uruchom wszystkie serwisy:
-
-   ```bash
-   docker-compose up
-   ```
-
-   Poczekaj aż zobaczysz "ready" dla wszystkich serwisów (5-10 sekund).
-
-2. Przygotuj dwa banki ( BANKPLPW i BANKDEXX ) - zarejestruj je według kroków poniżej.
-
----
-
-### Krok 1: Utworzenie banków
-
-```bash
-# Bank Polski
-curl -X POST http://localhost:8001/banks \
-  -H "Content-Type: application/json" \
-  -d '{"bic": "BANKPLPW", "name": "Bank Polski"}'
-
-# Deutsche Bank
-curl -X POST http://localhost:8001/banks \
-  -H "Content-Type: application/json" \
-  -d '{"bic": "BANKDEXX", "name": "Deutsche Bank"}'
-```
-
-**Co się dzieje:** TARGET tworzy bank i automatycznie zakłada mu konto rozliczeniowe z saldem 0.
-
-**Weryfikacja:**
-
-```bash
-curl http://localhost:8001/banks
-```
-
----
-
-### Krok 2: Wstrzyknięcie płynności
-
-Bez tego kroku żaden transfer się nie powiedzie - bank musi mieć środki na koncie!
-
-```bash
-# 1 000 000 EUR dla Banku Polskiego
-curl -X POST http://localhost:8001/liquidity/injection \
-  -H "Content-Type: application/json" \
-  -d '{"bank_bic": "BANKPLPW", "amount": 1000000.00, "currency": "EUR"}'
-
-# 500 000 EUR dla Deutsche Bank
-curl -X POST http://localhost:8001/liquidity/injection \
-  -H "Content-Type: application/json" \
-  -d '{"bank_bic": "BANKDEXX", "amount": 500000.00, "currency": "EUR"}'
-```
-
-**Co się dzieje:** Operator (centralny bank) dodaje środki na konta rozliczeniowe banków.
-
-**Weryfikacja:**
-
-```bash
-curl http://localhost:8001/banks/BANKPLPW
-# Sprawdź pole "balance" - powinno być 1000000.00
-```
-
----
-
-### Krok 3: SEPA Instant Transfer (rozliczenie natychmiastowe)
-
-```bash
-curl -X POST http://localhost:8003/transfers \
-  -H "Content-Type: application/json" \
-  -d '{
-    "sender_iban": "PL61109010140000071219812874",
-    "receiver_iban": "DE89370400440532013000",
-    "sender_bic": "BANKPLPW",
-    "receiver_bic": "BANKDEXX",
-    "amount": 100.00,
-    "currency": "EUR"
-  }'
-```
-
-**Co się dzieje:**
-
-- SEPA Instant NATYCHMIAST wysyła żądanie do TARGET `/settle/payment`
-- Rozliczenie trwa ~1-2 sekundy
-- Salda obu banków aktualizują się automatycznie
-
-**Możliwe odpowiedzi:**
-
-- ✅ `{"status": "settled", ...}` - transfer wykonany
-- ❌ `{"detail": "Insufficient funds"}` - brak środków (powtórz Krok 2)
-
-**Weryfikacja salda:**
-
-```bash
-curl http://localhost:8001/banks/BANKPLPW
-curl http://localhost:8001/banks/BANKDEXX
-```
-
----
-
-### Krok 4: SEPA Batch Transfer (kolejkowanie)
-
-```bash
-curl -X POST http://localhost:8002/transfers \
-  -H "Content-Type: application/json" \
-  -d '{
-    "sender_iban": "PL61109010140000071219812874",
-    "receiver_iban": "DE89370400440532013000",
-    "sender_bic": "BANKPLPW",
-    "receiver_bic": "BANKDEXX",
-    "amount": 1000.00,
-    "currency": "EUR",
-    "bank_bic": "BANKPLPW"
-  }'
-```
-
-**Co się dzieje:**
-
-- Transfer NIE jest od razu rozliczany
-- Idzie do kolejki z statusem `QUEUED`
-- Czeka na zamknięcie sesji
-
-**Weryfikacja - sprawdź sesję:**
-
-```bash
-curl http://localhost:8002/sessions
-```
-
-Odpowiedź zawiera `session_id` - zapamiętaj go.
-
----
-
-### Krok 5: Batch Transfer - wiele transakcji + netting
-
-Dodaj więcej transferów (w obie strony dla demonstracji nettingu):
-
-```bash
-# Transfer A → B
-curl -X POST http://localhost:8002/transfers \
-  -H "Content-Type: application/json" \
-  -d '{
-    "sender_iban": "PL61109010140000071219812874",
-    "receiver_iban": "DE89370400440532013000",
-    "sender_bic": "BANKPLPW",
-    "receiver_bic": "BANKDEXX",
-    "amount": 500.00,
-    "currency": "EUR",
-    "bank_bic": "BANKPLPW"
-  }'
-
-# Transfer B → A
-curl -X POST http://localhost:8002/transfers \
-  -H "Content-Type: application/json" \
-  -d '{
-    "sender_iban": "DE89370400440532013000",
-    "receiver_iban": "PL61109010140000071219812874",
-    "sender_bic": "BANKDEXX",
-    "receiver_bic": "BANKPLPW",
-    "amount": 200.00,
-    "currency": "EUR"
-  }'
-```
-
-**Co to jest netting?**
-Zamiast 2 osobnych rozliczeń (1000 + 200), system policzy NETTO:
-
-- BankPLPW płaci BankDEXX: 500 - 200 = **300 EUR** (tylko jedno rozliczenie)
-
----
-
-### Krok 6: Zamknięcie sesji i rozliczenie
-
-**Opcja A - Ręcznie (natychmiast):**
-
-```bash
-curl -X POST http://localhost:8002/sessions/close/{session_id}
-```
-
-Zamień `{session_id}` na ID z Kroku 4.
-
-**Opcja B - Automatycznie (po 5 minutach):**
-Celem nie jest ręczne zamykanie - **worker robi to automatycznie** co 5 minut (SESSION_CLOSE_INTERVAL=300).
-
-**Co się dzieje przy zamknięciu:**
-
-1. Worker pobiera wszystkie transfery z sesji
-2. Liczy netting (sumuje credits/debits per bank)
-3. Wysyła do TARGET TYLKO jedno rozliczenie netto
-4. Status sesji zmienia się na `CLOSED`
-5. Status transferów zmienia się na `PROCESSED`
-
-**Weryfikacja:**
-
-```bash
-# Stan sesji
-curl http://localhost:8002/sessions/{session_id}
-
-# Stan kont po rozliczeniu
-curl http://localhost:8001/banks/BANKPLPW
-curl http://localhost:8001/banks/BANKDEXX
-```
-
----
-
-### Krok 7: Automatyczne retry (SEPA Instant)
-
-Jeśli przelew instant nie mógł być wykonany (brak środków), worker automatycznie:
-
-1. Co **1 minutę** sprawdza kolejkę `PendingTransferQueue`
-2. Retry do TARGET `/settle/payment`
-3. Jeśli środki już są → transfer się wykonuje
-
-**Jak sprawdzić pending transfery:**
-
-```bash
-curl http://localhost:8003/transfers
-```
-
----
-
 ## Tabela: Czasy i automatyzacja
 
 | Akcja                  | Czas oczekiwania        | Co robi system automatycznie             |
@@ -553,7 +665,7 @@ Wykonaj Krok 2 ponownie - wstrzyknij więcej płynności.
 | ---------------------- | ----------------------------------- | ------------------------ |
 | DATABASE_URL           | PostgreSQL connection string        | postgresql+asyncpg://... |
 | REDIS_URL              | Redis connection string             | redis://localhost:6379/0 |
-| TARGET_URL             | TARGET service URL                  | https://localhost:8001   |
+| TARGET_URL             | TARGET service URL                  | http://localhost:8001    |
 | SESSION_CLOSE_INTERVAL | Interwał zamknięcia sesji (sekundy) | 300                      |
 
 ---

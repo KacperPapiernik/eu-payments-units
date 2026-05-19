@@ -16,7 +16,7 @@ class SettlementTransaction(Base):
     __tablename__ = "settlement_transactions"
 
     id = Column(Integer, primary_key=True, index=True)
-    transaction_id = Column(String(36), unique=True, nullable=False, index=True)
+    transaction_id = Column(String(100), unique=True, nullable=False, index=True)
     sender_bic = Column(String(11), nullable=False, index=True)
     receiver_bic = Column(String(11), nullable=False, index=True)
     amount = Column(Numeric(19, 2), nullable=False)

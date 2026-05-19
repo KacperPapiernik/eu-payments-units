@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Response, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import uuid
@@ -6,12 +6,7 @@ import uuid
 from sepa_batch_service.app.database import get_db
 from sepa_batch_service.app.models.batch_session import BatchSession, SessionStatus
 from sepa_batch_service.app.models.queued_transfer import QueuedTransfer, TransferStatus
-from sepa_batch_service.app.schemas.transfer import (
-    TransferRequest,
-    TransferResponse,
-    BatchSubmissionRequest,
-    BatchSubmissionResponse,
-)
+from sepa_batch_service.app.schemas.transfer import TransferRequest, TransferResponse
 from shared.security.iban_validator import validate_iban
 from shared.sepa_xml import parse_iso20022_payment_xml, build_payment_status_xml
 
@@ -58,8 +53,8 @@ async def queue_single_transfer(
         description=transfer.description,
         status=TransferStatus.QUEUED,
     )
-    db.add(queued)
 
+    db.add(queued)
     session.transaction_count += 1
 
     await db.commit()
@@ -73,22 +68,29 @@ async def queue_single_transfer(
     )
 
 
-@router.post("", response_model=TransferResponse)
+@router.post("", response_model=TransferResponse, include_in_schema=False) 
 async def submit_transfer(
-    transfer: TransferRequest,
-    db: AsyncSession = Depends(get_db),
-):
+        transfer: TransferRequest, 
+        db: AsyncSession = Depends(get_db), 
+): 
     return await queue_single_transfer(transfer, db)
 
-
-@router.post("/xml")
+@router.post(
+    "/xml",
+    response_class=Response,
+    responses={
+        200: {
+            "content": {"application/xml": {}},
+            "description": "XML payment status response",
+        }
+    },
+)
 async def submit_transfer_xml(
-    request: Request,
+    xml_body: str = Body(..., media_type="application/xml"),
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        xml_body = await request.body()
-        parsed = parse_iso20022_payment_xml(xml_body.decode("utf-8"))
+        parsed = parse_iso20022_payment_xml(xml_body)
 
         transfer = TransferRequest(
             sender_iban=parsed["sender_iban"],
@@ -116,52 +118,3 @@ async def submit_transfer_xml(
 
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-
-
-@router.post("/batch", response_model=BatchSubmissionResponse)
-async def submit_batch(
-    batch: BatchSubmissionRequest,
-    db: AsyncSession = Depends(get_db),
-):
-    for t in batch.transfers:
-        validate_transfer_iban(t.sender_iban, "sender_iban")
-        validate_transfer_iban(t.receiver_iban, "receiver_iban")
-
-    result = await db.execute(
-        select(BatchSession).where(BatchSession.status == SessionStatus.OPEN)
-    )
-    session = result.scalar_one_or_none()
-
-    if not session:
-        session_id = batch.session_id or str(uuid.uuid4())
-        session = BatchSession(
-            session_id=session_id,
-            status=SessionStatus.OPEN,
-        )
-        db.add(session)
-        await db.flush()
-
-    for t in batch.transfers:
-        transfer_id = str(uuid.uuid4())
-        queued = QueuedTransfer(
-            transfer_id=transfer_id,
-            session_id=session.session_id,
-            sender_iban=t.sender_iban,
-            receiver_iban=t.receiver_iban,
-            sender_bic=t.sender_bic,
-            receiver_bic=t.receiver_bic,
-            amount=t.amount,
-            currency=t.currency,
-            description=t.description,
-            status=TransferStatus.QUEUED,
-        )
-        db.add(queued)
-        session.transaction_count += 1
-
-    await db.commit()
-
-    return BatchSubmissionResponse(
-        session_id=session.session_id,
-        transfers_queued=len(batch.transfers),
-        status="queued",
-    )

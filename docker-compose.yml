@@ -64,7 +64,7 @@ services:
       - DATABASE_URL=postgresql+asyncpg://payments:payments_secret@postgres:5432/payments
       - REDIS_URL=redis://redis:6379/1
       - SERVICE_NAME=sepa_batch
-      - TARGET_URL=https://target_service:8001
+      - TARGET_URL=http://target_service:8001
       - CA_CERT_PATH=/certs/ca.pem
       - SERVICE_CERT_PATH=/certs/sepa_batch.pem
       - SERVICE_KEY_PATH=/certs/sepa_batch.key
@@ -94,7 +94,7 @@ services:
       - DATABASE_URL=postgresql+asyncpg://payments:payments_secret@postgres:5432/payments
       - REDIS_URL=redis://redis:6379/2
       - SERVICE_NAME=sepa_instant
-      - TARGET_URL=https://target_service:8001
+      - TARGET_URL=http://target_service:8001
       - CA_CERT_PATH=/certs/ca.pem
       - SERVICE_CERT_PATH=/certs/sepa_instant.pem
       - SERVICE_KEY_PATH=/certs/sepa_instant.key
@@ -124,7 +124,7 @@ services:
       - DATABASE_URL=postgresql+asyncpg://payments:payments_secret@postgres:5432/payments
       - REDIS_URL=redis://redis:6379/1
       - SERVICE_NAME=sepa_batch
-      - TARGET_URL=https://target_service:8001
+      - TARGET_URL=http://target_service:8001
       - CA_CERT_PATH=/certs/ca.pem
       - SERVICE_CERT_PATH=/certs/sepa_batch.pem
       - SERVICE_KEY_PATH=/certs/sepa_batch.key
@@ -152,7 +152,7 @@ services:
       - DATABASE_URL=postgresql+asyncpg://payments:payments_secret@postgres:5432/payments
       - REDIS_URL=redis://redis:6379/2
       - SERVICE_NAME=sepa_instant
-      - TARGET_URL=https://target_service:8001
+      - TARGET_URL=http://target_service:8001
       - CA_CERT_PATH=/certs/ca.pem
       - SERVICE_CERT_PATH=/certs/sepa_instant.pem
       - SERVICE_KEY_PATH=/certs/sepa_instant.key

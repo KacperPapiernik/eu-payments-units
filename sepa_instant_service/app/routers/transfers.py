@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Body, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime
@@ -9,9 +9,14 @@ from decimal import Decimal
 from sepa_instant_service.app.database import get_db
 from sepa_instant_service.app.models.instant_transfer import InstantTransfer, InstantTransferStatus
 from sepa_instant_service.app.models.pending_transfer_queue import PendingTransferQueue, LiquidityAlert
-from sepa_instant_service.app.schemas.transfer import InstantTransferRequest, InstantTransferResponse, TransferStatusResponse
+from sepa_instant_service.app.schemas.transfer import (
+    InstantTransferRequest,
+    InstantTransferResponse,
+    TransferStatusResponse,
+)
 from shared.security.iban_validator import validate_iban
 from shared.sepa_xml import parse_iso20022_payment_xml, build_payment_status_xml
+from sepa_instant_service.app.config import settings
 
 router = APIRouter(prefix="/transfers", tags=["transfers"])
 
@@ -56,7 +61,6 @@ async def process_instant_transfer(
     transfer: InstantTransferRequest,
     db: AsyncSession,
 ) -> InstantTransferResponse:
-    from sepa_instant_service.app.config import settings
 
     validate_iban_strict(transfer.sender_iban, "sender_iban")
     validate_iban_strict(transfer.receiver_iban, "receiver_iban")
@@ -74,6 +78,7 @@ async def process_instant_transfer(
         description=transfer.description,
         status=InstantTransferStatus.PROCESSING,
     )
+
     db.add(instant_transfer)
     await db.flush()
 
@@ -107,14 +112,16 @@ async def process_instant_transfer(
         existing_alert = alert_result.scalar_one_or_none()
 
         if not existing_alert:
-            alert = LiquidityAlert(
-                bank_bic=transfer.sender_bic,
-                alert_type="insufficient_liquidity",
-                message=f"Transfer {transfer_id} queued due to insufficient liquidity",
+            db.add(
+                LiquidityAlert(
+                    bank_bic=transfer.sender_bic,
+                    alert_type="insufficient_liquidity",
+                    message=f"Transfer {transfer_id} queued due to insufficient liquidity",
+                )
             )
-            db.add(alert)
 
         instant_transfer.status = InstantTransferStatus.PENDING
+
     else:
         instant_transfer.status = InstantTransferStatus.SETTLED
         instant_transfer.processed_at = datetime.utcnow()
@@ -129,22 +136,31 @@ async def process_instant_transfer(
     )
 
 
-@router.post("", response_model=InstantTransferResponse)
+@router.post("", response_model=InstantTransferResponse, include_in_schema=False)
 async def submit_instant_transfer(
     transfer: InstantTransferRequest,
     db: AsyncSession = Depends(get_db),
+    include_in_schema=False,
 ):
     return await process_instant_transfer(transfer, db)
 
 
-@router.post("/xml")
+@router.post(
+    "/xml",
+    response_class=Response,
+    responses={
+        200: {
+            "content": {"application/xml": {}},
+            "description": "Instant transfer XML response",
+        }
+    },
+)
 async def submit_instant_transfer_xml(
-    request: Request,
+    xml_body: str = Body(..., media_type="application/xml"),
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        xml_body = await request.body()
-        parsed = parse_iso20022_payment_xml(xml_body.decode("utf-8"))
+        parsed = parse_iso20022_payment_xml(xml_body)
 
         transfer = InstantTransferRequest(
             sender_iban=parsed["sender_iban"],
@@ -182,10 +198,16 @@ async def submit_instant_transfer_xml(
 
 
 @router.get("/{transfer_id}", response_model=TransferStatusResponse)
-async def get_transfer_status(transfer_id: str, db: AsyncSession = Depends(get_db)):
+async def get_transfer_status(
+    transfer_id: str,
+    db: AsyncSession = Depends(get_db),
+):
     result = await db.execute(
-        select(InstantTransfer).where(InstantTransfer.transfer_id == transfer_id)
+        select(InstantTransfer).where(
+            InstantTransfer.transfer_id == transfer_id
+        )
     )
+
     transfer = result.scalar_one_or_none()
 
     if not transfer:
@@ -202,8 +224,11 @@ async def get_transfer_status(transfer_id: str, db: AsyncSession = Depends(get_d
 @router.get("")
 async def get_transfers(db: AsyncSession = Depends(get_db)):
     result = await db.execute(
-        select(InstantTransfer).order_by(InstantTransfer.created_at.desc()).limit(100)
+        select(InstantTransfer)
+        .order_by(InstantTransfer.created_at.desc())
+        .limit(100)
     )
+
     transfers = result.scalars().all()
 
     return [

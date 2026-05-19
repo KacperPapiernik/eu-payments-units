@@ -60,9 +60,18 @@ async def perform_netting(session_id: str, db: AsyncSession):
         db.add(netting)
         
         if netting.net_position != 0:
+            # Positive position: ECB sends money to bank
+            if netting.net_position > 0:
+                sender_bic = "ECBCLS00XXX"
+                receiver_bic = bank_bic
+            # Negative position: bank sends money to ECB
+            else:
+                sender_bic = bank_bic
+                receiver_bic = "ECBCLS00XXX"
+            
             settlement_result = await send_to_target(
-                sender_bic="SEPA_BATCH",
-                receiver_bic=bank_bic,
+                sender_bic=sender_bic,
+                receiver_bic=receiver_bic,
                 amount=abs(netting.net_position),
                 transaction_id=f"NETT-{session_id}-{bank_bic}",
                 service="sepa_batch"

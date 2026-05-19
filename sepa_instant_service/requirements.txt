@@ -1,4 +1,3 @@
-# Base dependencies
 fastapi==0.109.0
 uvicorn[standard]==0.27.0
 sqlalchemy[asyncio]==2.0.25
@@ -11,6 +10,5 @@ pyjwt==2.8.0
 httpx==0.26.0
 python-multipart==0.0.6
 
-# Worker dependencies (Celery + Redis for task queue)
 celery==5.3.6
 redis==5.0.1
