@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Alerty - Panel Rozliczeniowy{% endblock %}
+
+{% block content %}
+<h3 class="mb-4"><i class="bi bi-exclamation-triangle me-2"></i>Alerty płynnościowe</h3>
+
+<div class="card text-bg-dark">
+  <div class="card-header"><i class="bi bi-lightning me-2"></i>SEPA Instant - Transfery</div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-dark table-hover mb-0 small">
+        <thead>
+          <tr>
+            <th>Transfer ID</th>
+            <th>Nadawca</th>
+            <th>Odbiorca</th>
+            <th>Kwota</th>
+            <th>Status</th>
+            <th>Błąd</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in transfers %}
+          <tr class="{% if t.status in ('pending', 'failed') %}table-danger{% endif %}">
+            <td title="{{ t.transfer_id }}">{{ t.transfer_id[:12] }}...</td>
+            <td>{{ t.sender_bic }}</td>
+            <td>{{ t.receiver_bic }}</td>
+            <td>€{{ "%.2f"|format(t.amount|float) }}</td>
+            <td>
+              {% set s = t.status %}
+              {% if s == 'settled' %}<span class="badge bg-success">SETTLED</span>
+              {% elif s == 'pending' %}<span class="badge bg-warning text-dark">PENDING</span>
+              {% elif s == 'failed' %}<span class="badge bg-danger">FAILED</span>
+              {% elif s == 'rejected' %}<span class="badge bg-danger">REJECTED</span>
+              {% else %}<span class="badge bg-secondary">{{ s }}</span>
+              {% endif %}
+            </td>
+            <td><small class="text-warning">{{ t.error_message[:40] if t.error_message else '-' }}</small></td>
+          </tr>
+          {% else %}
+          <tr><td colspan="6" class="text-center text-secondary py-3">Brak transferów</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="card-footer small text-secondary">
+    <i class="bi bi-info-circle me-1"></i>
+    Status PENDING oznacza brak płynności - worker SEPA Instant retry co 1 minutę.
+    Po 2h bank zostaje automatycznie zablokowany.
+  </div>
+</div>
+{% endblock %}

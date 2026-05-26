@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Banki - Panel Rozliczeniowy{% endblock %}
+
+{% block content %}
+<h3 class="mb-4"><i class="bi bi-building me-2"></i>Banki</h3>
+
+{% if error %}
+<div class="alert alert-danger">{{ error }}</div>
+{% endif %}
+
+<div class="card text-bg-dark">
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-dark table-hover mb-0">
+        <thead>
+          <tr>
+            <th>BIC</th>
+            <th>Nazwa</th>
+            <th>Saldo</th>
+            <th>Dostępne</th>
+            <th>Limit debetu</th>
+            <th>Status</th>
+            <th>Akcje</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for b in banks %}
+          <tr>
+            <td><strong>{{ b.bic }}</strong></td>
+            <td>{{ b.name }}</td>
+            <td>€{{ "%.2f"|format((b.settlement_accounts[0].balance if b.settlement_accounts else 0)|float) }}</td>
+            <td>€{{ "%.2f"|format((b.settlement_accounts[0].available_balance if b.settlement_accounts else 0)|float) }}</td>
+            <td>€{{ "%.2f"|format((b.settlement_accounts[0].limit_debt if b.settlement_accounts else 0)|float) }}</td>
+            <td>
+              {% if b.is_blocked %}
+              <span class="badge bg-danger">Zablokowany</span>
+              {% else %}
+              <span class="badge bg-success">Aktywny</span>
+              {% endif %}
+            </td>
+            <td>
+              <a href="/banks/{{ b.bic }}" class="btn btn-sm btn-outline-light me-1">
+                <i class="bi bi-eye"></i>
+              </a>
+              {% if b.is_blocked %}
+              <button hx-post="/banks/{{ b.bic }}/unblock" hx-target="#action-result" class="btn btn-sm btn-success">
+                <i class="bi bi-unlock"></i>
+              </button>
+              {% else %}
+              <button hx-post="/banks/{{ b.bic }}/block" hx-target="#action-result" class="btn btn-sm btn-warning">
+                <i class="bi bi-lock"></i>
+              </button>
+              {% endif %}
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="7" class="text-center text-secondary py-4">Brak zarejestrowanych banków. Utwórz bank przez API TARGET.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div id="action-result" class="mt-3"></div>
+{% endblock %}

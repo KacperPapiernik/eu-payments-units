@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Płynność - Panel Rozliczeniowy{% endblock %}
+
+{% block content %}
+<h3 class="mb-4"><i class="bi bi-droplet me-2"></i>Zarządzanie płynnością</h3>
+
+<div class="row g-4">
+  <div class="col-md-6">
+    <div class="card text-bg-dark">
+      <div class="card-header"><i class="bi bi-arrow-down-circle me-2"></i>Wstrzyknięcie płynności</div>
+      <div class="card-body">
+        <p class="small text-secondary">
+          Dodaje środki na konto rozliczeniowe banku w systemie TARGET.
+          Symuluje operację banku centralnego (ECB).
+        </p>
+        <form hx-post="/liquidity/inject" hx-target="#inject-result">
+          <div class="mb-3">
+            <label class="form-label small">Bank (BIC)</label>
+            <select name="bank_bic" class="form-select" required>
+              <option value="">-- wybierz bank --</option>
+              {% for b in banks %}
+              <option value="{{ b.bic }}">{{ b.bic }} - {{ b.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small">Kwota (EUR)</label>
+            <input type="number" name="amount" step="0.01" min="0.01" value="1000000.00" class="form-control" required>
+          </div>
+          <button type="submit" class="btn btn-info">
+            <i class="bi bi-droplet me-1"></i>Wstrzyknij płynność
+          </button>
+        </form>
+        <div id="inject-result" class="mt-3"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6">
+    <div class="card text-bg-dark">
+      <div class="card-header"><i class="bi bi-info-circle me-2"></i>Informacje</div>
+      <div class="card-body">
+        <h6>Dostępne banki:</h6>
+        <ul class="list-group list-group-flush">
+          {% for b in banks %}
+          <li class="list-group-item d-flex justify-content-between align-items-center bg-dark text-light border-secondary">
+            <span>
+              <strong>{{ b.bic }}</strong>
+              <small class="text-secondary ms-2">{{ b.name }}</small>
+            </span>
+            {% if b.is_blocked %}
+            <span class="badge bg-danger">Zablokowany</span>
+            {% endif %}
+          </li>
+          {% else %}
+          <li class="list-group-item bg-dark text-secondary">Brak banków</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Sesja {{ session.session_id[:12] }}... - Batch{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/batch" class="text-light">Sesje Batch</a></li>
+    <li class="breadcrumb-item active">{{ session.session_id[:16] }}...</li>
+  </ol>
+</nav>
+
+<div class="row g-3">
+  <div class="col-md-4">
+    <div class="card text-bg-dark h-100">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-info-circle me-2"></i>Informacje o sesji</span>
+        {% set st = session.status %}
+        {% if st == 'open' %}
+        <span class="badge bg-primary">OPEN</span>
+        {% elif st == 'closed' %}
+        <span class="badge bg-info">CLOSED</span>
+        {% elif st == 'netting_complete' %}
+        <span class="badge bg-success">NETTING ✓</span>
+        {% elif st == 'settled' %}
+        <span class="badge bg-secondary">SETTLED</span>
+        {% endif %}
+      </div>
+      <div class="card-body">
+        <dl class="row mb-0 small">
+          <dt class="col-sm-6">ID sesji</dt>
+          <dd class="col-sm-6"><code>{{ session.session_id }}</code></dd>
+          <dt class="col-sm-6">Transakcje</dt>
+          <dd class="col-sm-6">{{ session.transaction_count or 0 }}</dd>
+          <dt class="col-sm-6">Otwarto</dt>
+          <dd class="col-sm-6"><small>{{ session.opened_at[:16] if session.opened_at else '-' }}</small></dd>
+          <dt class="col-sm-6">Zamknięto</dt>
+          <dd class="col-sm-6"><small>{{ session.closed_at[:16] if session.closed_at else '-' }}</small></dd>
+        </dl>
+      </div>
+      <div class="card-footer">
+        {% if st == 'open' %}
+        <button hx-post="/batch/{{ session.session_id }}/close" hx-target="#close-result"
+                class="btn btn-danger w-100" hx-confirm="Zamknąć sesję i uruchomić netting?">
+          <i class="bi bi-lock me-1"></i>Zamknij sesję i wykonaj netting
+        </button>
+        {% endif %}
+        <div id="close-result" class="mt-2"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-8">
+    <div hx-get="/batch/{{ session.session_id }}/visualize" hx-trigger="load" hx-target="#viz-container">
+      <div id="viz-container" class="text-center text-secondary py-5">
+        <div class="spinner-border" role="status"></div>
+        <div class="mt-2 small">Ładowanie wizualizacji nettingu...</div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

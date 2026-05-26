@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}{{ bank.bic }} - Bank{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/banks" class="text-light">Banki</a></li>
+    <li class="breadcrumb-item active">{{ bank.bic }}</li>
+  </ol>
+</nav>
+
+<div class="row g-3">
+  <div class="col-md-6">
+    <div class="card text-bg-dark">
+      <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-building me-2"></i>{{ bank.name }}</h5>
+      </div>
+      <div class="card-body">
+        <dl class="row mb-0">
+          <dt class="col-sm-4">BIC</dt>
+          <dd class="col-sm-8"><code>{{ bank.bic }}</code></dd>
+
+          <dt class="col-sm-4">Status</dt>
+          <dd class="col-sm-8">
+            {% if bank.is_blocked %}
+            <span class="badge bg-danger">Zablokowany</span>
+            {% else %}
+            <span class="badge bg-success">Aktywny</span>
+            {% endif %}
+          </dd>
+
+          <dt class="col-sm-4">Utworzono</dt>
+          <dd class="col-sm-8">{{ bank.created_at[:10] if bank.created_at else '-' }}</dd>
+        </dl>
+      </div>
+      <div class="card-footer d-flex gap-2" id="bank-action-result">
+        {% if bank.is_blocked %}
+        <button hx-post="/banks/{{ bank.bic }}/unblock" hx-target="#bank-action-result" class="btn btn-success btn-sm">
+          <i class="bi bi-unlock me-1"></i>Odblokuj
+        </button>
+        {% else %}
+        <button hx-post="/banks/{{ bank.bic }}/block" hx-target="#bank-action-result" class="btn btn-warning btn-sm">
+          <i class="bi bi-lock me-1"></i>Zablokuj
+        </button>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6">
+    <div class="card text-bg-dark">
+      <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-wallet2 me-2"></i>Konto rozliczeniowe</h5>
+      </div>
+      <div class="card-body">
+        {% set acc = bank.settlement_accounts[0] if bank.settlement_accounts else None %}
+        {% if acc %}
+        <dl class="row mb-0">
+          <dt class="col-sm-5">Waluta</dt>
+          <dd class="col-sm-7">{{ acc.currency }}</dd>
+
+          <dt class="col-sm-5">Saldo</dt>
+          <dd class="col-sm-7">
+            <span class="fs-5 fw-bold">€{{ "%.2f"|format(acc.balance|float) }}</span>
+          </dd>
+
+          <dt class="col-sm-5">Dostępne środki</dt>
+          <dd class="col-sm-7">
+            <span class="fs-5">€{{ "%.2f"|format(acc.available_balance|float) }}</span>
+          </dd>
+
+          <dt class="col-sm-5">Limit debetu</dt>
+          <dd class="col-sm-7">€{{ "%.2f"|format(acc.limit_debt|float) }}</dd>
+        </dl>
+        {% else %}
+        <p class="text-secondary mb-0">Brak konta rozliczeniowego</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12">
+    <div class="card text-bg-dark">
+      <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-droplet me-2"></i>Zarządzanie płynnością</h5>
+      </div>
+      <div class="card-body">
+        <form hx-post="/liquidity/inject" hx-target="#liq-result" class="row g-2 align-items-end">
+          <input type="hidden" name="bank_bic" value="{{ bank.bic }}">
+          <div class="col-auto">
+            <label class="small">Kwota</label>
+            <input type="number" name="amount" step="0.01" min="0.01" value="100000" class="form-control form-control-sm" required>
+          </div>
+          <div class="col-auto">
+            <label class="small">&nbsp;</label>
+            <button type="submit" class="btn btn-sm btn-info form-control-sm">
+              <i class="bi bi-droplet me-1"></i>Wstrzyknij płynność
+            </button>
+          </div>
+        </form>
+        <div id="liq-result" class="mt-2"></div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

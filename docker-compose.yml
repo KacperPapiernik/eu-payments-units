@@ -169,6 +169,31 @@ services:
     networks:
       - payment_network
 
+  frontend_service:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: frontend_service
+    environment:
+      - TARGET_URL=http://target_service:8001
+      - SEPA_BATCH_URL=http://sepa_batch_service:8002
+      - SEPA_INSTANT_URL=http://sepa_instant_service:8003
+      - JWT_SECRET=frontend-jwt-secret-change-in-production
+      - DEBUG=true
+      - HOST=0.0.0.0
+      - PORT=8004
+    ports:
+      - "8004:8004"
+    depends_on:
+      target_service:
+        condition: service_started
+      sepa_batch_service:
+        condition: service_started
+      sepa_instant_service:
+        condition: service_started
+    networks:
+      - payment_network
+
 volumes:
   postgres_data:
 

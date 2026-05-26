@@ -234,10 +234,13 @@ async def get_transfers(db: AsyncSession = Depends(get_db)):
     return [
         {
             "transfer_id": t.transfer_id,
+            "sender_iban": t.sender_iban,
+            "receiver_iban": t.receiver_iban,
             "sender_bic": t.sender_bic,
             "receiver_bic": t.receiver_bic,
             "amount": float(t.amount),
             "status": t.status.value,
+            "error_message": t.error_message,
             "created_at": t.created_at.isoformat(),
         }
         for t in transfers

@@ -1,0 +1,145 @@
+<div class="row g-3">
+  {% if session_report %}
+  <div class="col-12">
+    <div class="card text-bg-dark border-info">
+      <div class="card-header"><i class="bi bi-pie-chart me-2"></i>Podsumowanie nettingu</div>
+      <div class="card-body">
+        <div class="row text-center">
+          <div class="col-3">
+            <div class="small text-secondary">Transakcje</div>
+            <div class="fs-4 fw-bold">{{ session_report.get('total_transactions', 0) }}</div>
+          </div>
+          <div class="col-3">
+            <div class="small text-secondary">Wartość brutto</div>
+            <div class="fs-4 fw-bold text-info">€{{ "%.2f"|format((session_report.get('total_credits', 0) or 0)|float) }}</div>
+          </div>
+          <div class="col-3">
+            <div class="small text-secondary">Rozliczenie netto</div>
+            <div class="fs-4 fw-bold text-success">€{{ "%.2f"|format((session_report.get('net_settlement_amount', 0) or 0)|float) }}</div>
+          </div>
+          <div class="col-3">
+            {% set gross = (session_report.get('total_credits', 0) or 0)|float %}
+            {% set net = (session_report.get('net_settlement_amount', 0) or 0)|float %}
+            {% set savings = ((gross - net) / gross * 100) if gross > 0 else 0 %}
+            <div class="small text-secondary">Oszczędność</div>
+            <div class="fs-4 fw-bold text-warning">{{ "%.1f"|format(savings) }}%</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if netting_results %}
+  <div class="col-md-7">
+    <div class="card text-bg-dark">
+      <div class="card-header"><i class="bi bi-bar-chart me-2"></i>Net position per bank</div>
+      <div class="card-body">
+        <canvas id="nettingChart" height="200"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-5">
+    <div class="card text-bg-dark">
+      <div class="card-header"><i class="bi bi-arrow-left-right me-2"></i>Przepływy netto</div>
+      <div class="card-body">
+        {% if payers and receivers %}
+          {% for payer in payers %}
+            {% for receiver in receivers %}
+            <div class="flow-row mb-2 p-2 rounded" style="background: rgba(255,255,255,0.05);">
+              <div class="d-flex justify-content-between align-items-center">
+                <span class="badge bg-danger">{{ payer.bic }}</span>
+                <span class="text-warning small fw-bold">→ €{{ "%.2f"|format(payer.amount) }} →</span>
+                <span class="badge bg-success">{{ receiver.bic }}</span>
+              </div>
+            </div>
+            {% endfor %}
+          {% endfor %}
+        {% else %}
+          <p class="text-secondary small mb-0">Bilans netto = 0 (wszystkie pozycje się równoważą)</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12">
+    <div class="card text-bg-dark">
+      <div class="card-header"><i class="bi bi-table me-2"></i>Szczegóły nettingu</div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-dark table-hover mb-0 small">
+            <thead>
+              <tr>
+                <th>Bank</th>
+                <th>Total Credits</th>
+                <th>Total Debits</th>
+                <th>Net Position</th>
+                <th>Rola</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for nr in netting_results %}
+              {% set pos = (nr.net_position or 0)|float %}
+              <tr>
+                <td><strong>{{ nr.bank_bic }}</strong></td>
+                <td class="text-success">€{{ "%.2f"|format((nr.total_credits or 0)|float) }}</td>
+                <td class="text-danger">€{{ "%.2f"|format((nr.total_debits or 0)|float) }}</td>
+                <td class="fw-bold {% if pos >= 0 %}text-success{% else %}text-danger{% endif %}">
+                  {{ '+' if pos >= 0 else '' }}€{{ "%.2f"|format(pos) }}
+                </td>
+                <td>
+                  {% if pos > 0 %}
+                  <span class="badge bg-success">Receiver (+)</span>
+                  {% elif pos < 0 %}
+                  <span class="badge bg-danger">Payer (-)</span>
+                  {% else %}
+                  <span class="badge bg-secondary">Zero</span>
+                  {% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% else %}
+  <div class="col-12">
+    <div class="alert alert-info">
+      <i class="bi bi-info-circle me-2"></i>Brak wyników nettingu. Sesja nie została jeszcze zamknięta.
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+{% if chart_labels and chart_values %}
+<script>
+  new Chart(document.getElementById('nettingChart'), {
+    type: 'bar',
+    data: {
+      labels: {{ chart_labels | tojson }},
+      datasets: [{
+        label: 'Net Position (EUR)',
+        data: {{ chart_values | tojson }},
+        backgroundColor: {{ chart_colors | tojson }},
+        borderColor: {{ chart_colors | tojson }},
+        borderWidth: 1
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { display: false }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          ticks: { callback: function(v) { return '€' + v.toLocaleString(); } }
+        }
+      }
+    }
+  });
+</script>
+{% endif %}

@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}Nowa płatność - Panel Rozliczeniowy{% endblock %}
+
+{% block content %}
+<h3 class="mb-4"><i class="bi bi-send me-2"></i>Nowa płatność</h3>
+
+<ul class="nav nav-tabs nav-fill mb-4" id="paymentTabs" role="tablist">
+  <li class="nav-item" role="presentation">
+    <button class="nav-link active" id="target-tab" data-bs-toggle="tab" data-bs-target="#target" type="button" role="tab">
+      <i class="bi bi-cpu me-1"></i>TARGET RTGS
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="batch-tab" data-bs-toggle="tab" data-bs-target="#batch" type="button" role="tab">
+      <i class="bi bi-layers me-1"></i>SEPA Batch
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="instant-tab" data-bs-toggle="tab" data-bs-target="#instant" type="button" role="tab">
+      <i class="bi bi-lightning me-1"></i>SEPA Instant
+    </button>
+  </li>
+</ul>
+
+<div class="tab-content">
+  <div class="tab-pane fade show active" id="target" role="tabpanel">
+    <div class="card text-bg-dark">
+      <div class="card-header">Przelew TARGET RTGS (natychmiastowe rozliczenie brutto)</div>
+      <div class="card-body">
+        <form hx-post="/payments/target" hx-target="#target-result">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label small">ID transakcji</label>
+              <input type="text" name="transaction_id" class="form-control" placeholder="auto-generowane" value="">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">Opis</label>
+              <input type="text" name="description" class="form-control" placeholder="Opis przelewu">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Nadawca (BIC)</label>
+              <input type="text" name="sender_bic" class="form-control" placeholder="ECBCLS00XXX" required>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Odbiorca (BIC)</label>
+              <input type="text" name="receiver_bic" class="form-control" placeholder="ECBCLS00XXX" required>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Kwota (EUR)</label>
+              <input type="number" name="amount" step="0.01" min="0.01" class="form-control" required>
+            </div>
+          </div>
+          <button type="submit" class="btn btn-primary mt-3">Wyślij przelew TARGET</button>
+        </form>
+        <div id="target-result" class="mt-3"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tab-pane fade" id="batch" role="tabpanel">
+    <div class="card text-bg-dark">
+        <div class="card-header">Przelew SEPA Batch (kolejkowany, netting)</div>
+      <div class="card-body">
+        <form hx-post="/payments/batch" hx-target="#batch-result">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label small">IBAN nadawcy</label>
+              <input type="text" name="sender_iban" class="form-control" placeholder="PL61109010140000071219812874" required>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">IBAN odbiorcy</label>
+              <input type="text" name="receiver_iban" class="form-control" placeholder="DE89370400440532013000" required>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">BIC nadawcy</label>
+              <input type="text" name="sender_bic" class="form-control" placeholder="ECBCLS00XXX" required>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">BIC odbiorcy</label>
+              <input type="text" name="receiver_bic" class="form-control" placeholder="ECBCLS00XXX" required>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Kwota (EUR)</label>
+              <input type="number" name="amount" step="0.01" min="0.01" class="form-control" required>
+            </div>
+            <div class="col-12">
+              <label class="form-label small">Opis</label>
+              <input type="text" name="description" class="form-control" placeholder="Opis przelewu">
+            </div>
+          </div>
+          <button type="submit" class="btn btn-success mt-3">Kolejkuj przelew Batch</button>
+        </form>
+        <div id="batch-result" class="mt-3"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tab-pane fade" id="instant" role="tabpanel">
+    <div class="card text-bg-dark">
+        <div class="card-header">Przelew SEPA Instant (natychmiastowy, 24/7)</div>
+      <div class="card-body">
+        <form hx-post="/payments/instant" hx-target="#instant-result">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label small">IBAN nadawcy</label>
+              <input type="text" name="sender_iban" class="form-control" placeholder="PL61109010140000071219812874" required>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">IBAN odbiorcy</label>
+              <input type="text" name="receiver_iban" class="form-control" placeholder="DE89370400440532013000" required>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">BIC nadawcy</label>
+              <input type="text" name="sender_bic" class="form-control" placeholder="ECBCLS00XXX" required>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">BIC odbiorcy</label>
+              <input type="text" name="receiver_bic" class="form-control" placeholder="ECBCLS00XXX" required>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Kwota (EUR)</label>
+              <input type="number" name="amount" step="0.01" min="0.01" class="form-control" required>
+            </div>
+            <div class="col-12">
+              <label class="form-label small">Opis</label>
+              <input type="text" name="description" class="form-control" placeholder="Opis przelewu">
+            </div>
+          </div>
+          <button type="submit" class="btn btn-warning mt-3">Wyślij przelew Instant</button>
+        </form>
+        <div id="instant-result" class="mt-3"></div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

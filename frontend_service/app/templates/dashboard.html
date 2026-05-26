@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - Panel Rozliczeniowy{% endblock %}
+
+{% block content %}
+<h3 class="mb-4"><i class="bi bi-speedometer2 me-2"></i>Dashboard</h3>
+
+<div class="row g-3 mb-4">
+  {% set services = [
+    ('TARGET RTGS', target_health, 'bi-cpu', 'primary'),
+    ('SEPA Batch', batch_health, 'bi-layers', 'success'),
+    ('SEPA Instant', instant_health, 'bi-lightning', 'warning'),
+  ] %}
+  {% for name, health, icon, color in services %}
+  <div class="col-md-4">
+    <div class="card text-bg-{{ color }} h-100">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center">
+          <div>
+            <h6 class="card-title mb-1">{{ name }}</h6>
+            <p class="mb-0 small">
+              {% if health and health.status == 'healthy' %}
+              <span class="badge bg-light text-dark"><i class="bi bi-check-circle-fill text-success"></i> online</span>
+              {% else %}
+              <span class="badge bg-dark"><i class="bi bi-x-circle-fill text-danger"></i> offline</span>
+              {% endif %}
+            </p>
+          </div>
+          <i class="{{ icon }} fs-1 opacity-50"></i>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="row g-3">
+  <div class="col-md-6">
+    <div class="card text-bg-dark">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-building me-2"></i>Banki</span>
+        <a href="/banks" class="btn btn-sm btn-outline-light">Zobacz wszystkie</a>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-dark table-hover mb-0 small">
+            <thead>
+              <tr>
+                <th>BIC</th>
+                <th>Nazwa</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for b in banks %}
+              <tr>
+                <td><a href="/banks/{{ b.bic }}" class="text-light">{{ b.bic }}</a></td>
+                <td>{{ b.name }}</td>
+                <td>
+                  {% if b.is_blocked %}
+                  <span class="badge bg-danger">Zablokowany</span>
+                  {% else %}
+                  <span class="badge bg-success">Aktywny</span>
+                  {% endif %}
+                </td>
+              </tr>
+              {% else %}
+              <tr><td colspan="3" class="text-center text-secondary">Brak banków</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6">
+    <div class="card text-bg-dark">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-lightning me-2"></i>Ostatnie przelewy Instant</span>
+        <a href="/payments/history" class="btn btn-sm btn-outline-light">Historia</a>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-dark table-hover mb-0 small">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Kwota</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for t in instant_transfers %}
+              <tr>
+                <td title="{{ t.transfer_id }}">{{ t.transfer_id[:8] }}...</td>
+                <td>€{{ "%.2f"|format(t.amount|float) }}</td>
+                <td>
+                  {% set s = t.status %}
+                  {% if s == 'settled' %}<span class="badge bg-success">Settled</span>
+                  {% elif s == 'pending' %}<span class="badge bg-warning text-dark">Pending</span>
+                  {% elif s == 'rejected' %}<span class="badge bg-danger">Rejected</span>
+                  {% else %}<span class="badge bg-secondary">{{ s }}</span>
+                  {% endif %}
+                </td>
+              </tr>
+              {% else %}
+              <tr><td colspan="3" class="text-center text-secondary">Brak przelewów</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6">
+    <div class="card text-bg-dark">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-layers me-2"></i>Sesje Batch</span>
+        <a href="/batch" class="btn btn-sm btn-outline-light">Zobacz wszystkie</a>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-dark table-hover mb-0 small">
+            <thead>
+              <tr>
+                <th>Sesja</th>
+                <th>Status</th>
+                <th>Transakcje</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for s in batch_sessions %}
+              <tr>
+                <td><a href="/batch/{{ s.session_id }}" class="text-light">{{ s.session_id[:8] }}...</a></td>
+                <td>
+                  {% set st = s.status %}
+                  {% if st == 'open' %}<span class="badge bg-primary">OPEN</span>
+                  {% elif st == 'closed' %}<span class="badge bg-info">CLOSED</span>
+                  {% elif st == 'netting_complete' %}<span class="badge bg-success">NETTING</span>
+                  {% elif st == 'settled' %}<span class="badge bg-secondary">SETTLED</span>
+                  {% else %}<span class="badge bg-dark">{{ st }}</span>
+                  {% endif %}
+                </td>
+                <td>{{ s.transaction_count or 0 }}</td>
+              </tr>
+              {% else %}
+              <tr><td colspan="3" class="text-center text-secondary">Brak sesji</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
