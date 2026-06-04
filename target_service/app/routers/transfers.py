@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Body, Response
+from fastapi import APIRouter, Depends, HTTPException, Body, Response, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime
@@ -19,6 +19,7 @@ from target_service.app.schemas.transfer import (
 )
 from shared.security.iban_validator import validate_iban
 from shared.sepa_xml import parse_iso20022_payment_xml, build_payment_status_xml
+from target_service.app.services.webhook_notifier import send_webhook
 
 router = APIRouter(prefix="/transfers", tags=["rtgs_transfers"])
 
@@ -32,6 +33,7 @@ def validate_iban_strict(iban: str, field_name: str):
 async def process_rtgs_transfer(
     transfer: RtgsTransferRequest,
     db: AsyncSession,
+    background_tasks: BackgroundTasks,
 ) -> RtgsTransferResponse:
     validate_iban_strict(transfer.sender_iban, "sender_iban")
     validate_iban_strict(transfer.receiver_iban, "receiver_iban")
@@ -142,6 +144,20 @@ async def process_rtgs_transfer(
     await db.commit()
     await db.refresh(rtgs_transfer)
 
+    background_tasks.add_task(
+        send_webhook,
+        receiver_bic=transfer.receiver_bic,
+        event="transfer.settled",
+        transfer_id=transfer_id,
+        sender_bic=transfer.sender_bic,
+        amount=transfer.amount,
+        currency=transfer.currency,
+        description=transfer.description,
+        settled_at=datetime.utcnow(),
+        sender_iban=transfer.sender_iban,
+        receiver_iban=transfer.receiver_iban,
+    )
+
     return RtgsTransferResponse(
         transfer_id=rtgs_transfer.transfer_id,
         status=rtgs_transfer.status.value,
@@ -152,9 +168,10 @@ async def process_rtgs_transfer(
 @router.post("", response_model=RtgsTransferResponse, include_in_schema=False)
 async def submit_transfer(
     transfer: RtgsTransferRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ):
-    return await process_rtgs_transfer(transfer, db)
+    return await process_rtgs_transfer(transfer, db, background_tasks)
 
 
 @router.post(
@@ -168,6 +185,7 @@ async def submit_transfer(
     },
 )
 async def submit_transfer_xml(
+    background_tasks: BackgroundTasks,
     xml_body: str = Body(..., media_type="application/xml"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -184,7 +202,7 @@ async def submit_transfer_xml(
             description=parsed.get("description") or "XML RTGS transfer",
         )
 
-        result = await process_rtgs_transfer(transfer, db)
+        result = await process_rtgs_transfer(transfer, db, background_tasks)
 
         xml_response = build_payment_status_xml(
             status="ACSC",

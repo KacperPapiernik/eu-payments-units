@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime
@@ -14,6 +14,7 @@ from target_service.app.schemas.settlement import (
     SettlementRequest,
     SettlementResponse,
 )
+from target_service.app.services.webhook_notifier import send_webhook
 
 router = APIRouter(prefix="/settle", tags=["settlement"])
 
@@ -29,6 +30,7 @@ async def get_bank_by_bic_cached(db: AsyncSession, bic: str):
 @router.post("/payment", response_model=SettlementResponse)
 async def settle_payment(
     payment: SettlementRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ):
     sender = await get_bank_by_bic_cached(
@@ -128,6 +130,20 @@ async def settle_payment(
     await db.refresh(transaction)
     await db.refresh(sender_account)
     await db.refresh(receiver_account)
+
+    background_tasks.add_task(
+        send_webhook,
+        receiver_bic=payment.receiver_bic,
+        event="payment.settled",
+        transfer_id=transaction.transaction_id,
+        sender_bic=payment.sender_bic,
+        amount=payment.amount,
+        currency=payment.currency,
+        description=payment.description,
+        settled_at=transaction.settled_at,
+        sender_iban=None,
+        receiver_iban=None,
+    )
 
     return SettlementResponse(
         transaction_id=transaction.transaction_id,

@@ -503,6 +503,10 @@ curl http://localhost:8003/transfers
   - `POST /transfers/xml` - Przelew RTGS bank → bank (XML ISO 20022)
   - `GET /transfers` - Lista przelewów RTGS
   - `GET /transfers/{id}` - Status przelewu RTGS
+  - `POST /banks/{bic}/webhook` - Rejestracja webhooka dla banku
+  - `GET /banks/{bic}/webhook` - Pobranie konfiguracji webhooka
+  - `DELETE /banks/{bic}/webhook` - Usunięcie webhooka
+- **Webhook**: automatyczne powiadomienie wysyłane do banku odbiorcy po każdym rozliczeniu (RTGS, SEPA Instant, SEPA Batch)
 
 ### SEPA Batch Service (Port 8002)
 
@@ -532,6 +536,96 @@ curl http://localhost:8003/transfers
   - `GET /transfers/{id}` - Status przelewu
   - `GET /transfers` - Lista przelewów
 - **Workery**: Celery worker rozwiązuje zaległe transfery i monitoruje alerty
+
+---
+
+## Webhooki (powiadomienia dla banków)
+
+Każde rozliczenie w TARGET niezależnie od źródła automatycznie wysyła
+powiadomienie (webhook) do banku odbiorcy, dzięki czemu bank może natychmiast
+uznać konto klienta.
+
+Webhook działa dla **wszystkich rodzajów przelewów**:
+
+| Rodzaj                                     | Port            | Event w webhooku   |
+| ------------------------------------------ | --------------- | ------------------ |
+| **RTGS Transfer** (bank → bank)            | `8001`          | `transfer.settled` |
+| **SEPA Instant** (płatność natychmiastowa) | `8003` → `8001` | `payment.settled`  |
+| **SEPA Batch** (clearing + netting)        | `8002` → `8001` | `payment.settled`  |
+
+### Rejestracja webhooka
+
+```bash
+curl -X POST http://localhost:8001/banks/BANKDEXX/webhook \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://bank-de.example/api/target-settlement", "secret": "my-secret"}'
+```
+
+Odpowiedź zawiera wygenerowany `secret` (lub ten, który podałeś):
+
+```json
+{
+  "bank_bic": "BANKDEXX",
+  "url": "https://bank-de.example/api/target-settlement",
+  "secret": "my-secret"
+}
+```
+
+> **Uwaga:** Jeśli nie podasz `secret`, TARGET wygeneruje losowy 64-znakowy klucz.
+
+### Payload wysyłany do banku
+
+Po każdym rozliczeniu TARGET wyśle POST na zarejestrowany URL banku odbiorcy.
+
+**RTGS Transfer (`transfer.settled`)** - zawiera IBAN nadawcy i odbiorcy:
+
+```json
+{
+  "event": "transfer.settled",
+  "transfer_id": "uuid-1234...",
+  "sender_bic": "BANKPLPW",
+  "receiver_bic": "BANKDEXX",
+  "sender_iban": "PL61109010140000071219812874",
+  "receiver_iban": "DE89370400440532013000",
+  "amount": 500.0,
+  "currency": "EUR",
+  "description": "RTGS transfer",
+  "settled_at": "2026-06-04T12:00:00",
+  "signature": "base64_hmac_sha256..."
+}
+```
+
+**SEPA Instant / SEPA Batch (`payment.settled`)** - IBAN nie jest dostępny
+(SEPA nie przekazuje IBAN do TARGET):
+
+```json
+{
+  "event": "payment.settled",
+  "transfer_id": "uuid-5678...",
+  "sender_bic": "BANKPLPW",
+  "receiver_bic": "BANKDEXX",
+  "sender_iban": null,
+  "receiver_iban": null,
+  "amount": 500.0,
+  "currency": "EUR",
+  "description": "SEPA settlement",
+  "settled_at": "2026-06-04T12:00:00",
+  "signature": "base64_hmac_sha256..."
+}
+```
+
+Pole `signature` to HMAC-SHA256 z całego payloadu (bez `signature`). Bank weryfikuje
+nim autentyczność webhooka.
+
+### Sprawdzenie konfiguracji
+
+```bash
+# Pobierz konfigurację webhooka dla banku
+curl http://localhost:8001/banks/BANKDEXX/webhook
+
+# Usuń webhook (dezaktywacja)
+curl -X DELETE http://localhost:8001/banks/BANKDEXX/webhook
+```
 
 ---
 
