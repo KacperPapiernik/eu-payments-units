@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Body, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime
+from xml.etree import ElementTree as ET
 import uuid
 
 from target_service.app.database import get_db
@@ -148,7 +149,7 @@ async def process_rtgs_transfer(
     )
 
 
-@router.post("", response_model=RtgsTransferResponse)
+@router.post("", response_model=RtgsTransferResponse, include_in_schema=False)
 async def submit_transfer(
     transfer: RtgsTransferRequest,
     db: AsyncSession = Depends(get_db),
@@ -196,7 +197,7 @@ async def submit_transfer_xml(
             media_type="application/xml",
         )
 
-    except ValueError as e:
+    except (ValueError, ET.ParseError) as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 

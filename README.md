@@ -128,46 +128,6 @@ curl http://localhost:8001/banks/BANKPLPW
 Bezpośredni przelew między bankami przez system TARGET (RTGS). W przeciwieństwie do SEPA, transfer jest rozliczany natychmiast i bezpośrednio na kontach rozliczeniowych banków.
 
 ```bash
-curl -X POST http://localhost:8001/transfers \
-  -H "Content-Type: application/json" \
-  -d '{
-    "sender_iban": "PL61109010140000071219812874",
-    "receiver_iban": "DE89370400440532013000",
-    "sender_bic": "BANKPLPW",
-    "receiver_bic": "BANKDEXX",
-    "amount": 500.00,
-    "currency": "EUR",
-    "description": "Direct RTGS transfer"
-  }'
-```
-
-**Co się dzieje:**
-
-- TARGET natychmiast sprawdza saldo Banku Polskiego
-- Obciąża konto BANKPLPW, uznaje konto BANKDEXX
-- Transfer rejestrowany w historii RTGS
-- Wszystko w jednym kroku, bez pośredników
-
-**Możliwe odpowiedzi:**
-
-- `{"status": "settled", "transfer_id": "...", "created_at": "..."}` - przelew wykonany
-- `{"detail": "Insufficient funds..."}` - brak środków (powtórz Krok 2)
-- `{"detail": "Sender bank is blocked: ..."}` - bank zablokowany
-
-**Weryfikacja:**
-
-```bash
-# Sprawdź salda po przelewie
-curl http://localhost:8001/banks/BANKPLPW
-curl http://localhost:8001/banks/BANKDEXX
-
-# Sprawdź historię przelewów RTGS
-curl http://localhost:8001/transfers
-```
-
-**Również w formacie XML (ISO 20022):**
-
-```bash
 curl -X POST http://localhost:8001/transfers/xml \
   -H "Content-Type: application/xml" \
   -d '
@@ -179,7 +139,7 @@ curl -X POST http://localhost:8001/transfers/xml \
     </PmtId>
 
     <Amt>
-      <InstdAmt Ccy="EUR">250.00</InstdAmt>
+      <InstdAmt Ccy="EUR">500.00</InstdAmt>
     </Amt>
 
     <DbtrAcct>
@@ -207,18 +167,35 @@ curl -X POST http://localhost:8001/transfers/xml \
     </CdtrAgt>
 
     <RmtInf>
-      <Ustrd>XML RTGS transfer</Ustrd>
+      <Ustrd>RTGS transfer</Ustrd>
     </RmtInf>
 
   </CstmrCdtTrfInitn>
 </Document>'
 ```
 
-**Weryfikacja XML:** Odpowiedź XML zawiera `transfer_id` (UUID) w polu `OrgnlEndToEndId` — użyj go do sprawdzenia statusu:
+**Co się dzieje:**
+
+- TARGET natychmiast sprawdza saldo Banku Polskiego
+- Obciąża konto BANKPLPW, uznaje konto BANKDEXX
+- Transfer rejestrowany w historii RTGS
+- Wszystko w jednym kroku, bez pośredników
+
+**Możliwe odpowiedzi:**
+
+- `{"status": "settled", "transfer_id": "...", "created_at": "..."}` - przelew wykonany
+- `{"detail": "Insufficient funds..."}` - brak środków (powtórz Krok 2)
+- `{"detail": "Sender bank is blocked: ..."}` - bank zablokowany
+
+**Weryfikacja:**
 
 ```bash
-# Podmień {transfer_id} na UUID z odpowiedzi XML
-curl http://localhost:8001/transfers/{transfer_id}
+# Sprawdź salda po przelewie
+curl http://localhost:8001/banks/BANKPLPW
+curl http://localhost:8001/banks/BANKDEXX
+
+# Sprawdź historię przelewów RTGS
+curl http://localhost:8001/transfers
 ```
 
 ---
