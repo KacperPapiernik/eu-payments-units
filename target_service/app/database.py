@@ -27,6 +27,7 @@ async def init_db():
     from target_service.app.models.bank import Bank, SettlementAccount
     from target_service.app.models.settlement_transaction import SettlementTransaction
     from target_service.app.models.liquidity_transfer import LiquidityTransfer
+    from target_service.app.models.rtgs_transfer import RtgsTransfer
     
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from target_service.app.config import settings
 from target_service.app.database import init_db, AsyncSessionLocal
 from target_service.app.init_system_bank import seed_system_bank
-from target_service.app.routers import banks, settlement, liquidity
+from target_service.app.routers import banks, settlement, liquidity, transfers
 
 
 def create_ssl_context() -> Optional[ssl.SSLContext]:
@@ -70,6 +70,7 @@ app.add_middleware(
 app.include_router(banks.router)
 app.include_router(settlement.router)
 app.include_router(liquidity.router)
+app.include_router(transfers.router)
 
 
 @app.get("/health")

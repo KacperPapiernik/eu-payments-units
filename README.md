@@ -123,7 +123,107 @@ curl http://localhost:8001/banks/BANKPLPW
 
 ---
 
-### Krok 3: SEPA Instant Transfer (rozliczenie natychmiastowe)
+### Krok 3: RTGS Transfer przez TARGET (bank → bank)
+
+Bezpośredni przelew między bankami przez system TARGET (RTGS). W przeciwieństwie do SEPA, transfer jest rozliczany natychmiast i bezpośrednio na kontach rozliczeniowych banków.
+
+```bash
+curl -X POST http://localhost:8001/transfers \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sender_iban": "PL61109010140000071219812874",
+    "receiver_iban": "DE89370400440532013000",
+    "sender_bic": "BANKPLPW",
+    "receiver_bic": "BANKDEXX",
+    "amount": 500.00,
+    "currency": "EUR",
+    "description": "Direct RTGS transfer"
+  }'
+```
+
+**Co się dzieje:**
+
+- TARGET natychmiast sprawdza saldo Banku Polskiego
+- Obciąża konto BANKPLPW, uznaje konto BANKDEXX
+- Transfer rejestrowany w historii RTGS
+- Wszystko w jednym kroku, bez pośredników
+
+**Możliwe odpowiedzi:**
+
+- `{"status": "settled", "transfer_id": "...", "created_at": "..."}` - przelew wykonany
+- `{"detail": "Insufficient funds..."}` - brak środków (powtórz Krok 2)
+- `{"detail": "Sender bank is blocked: ..."}` - bank zablokowany
+
+**Weryfikacja:**
+
+```bash
+# Sprawdź salda po przelewie
+curl http://localhost:8001/banks/BANKPLPW
+curl http://localhost:8001/banks/BANKDEXX
+
+# Sprawdź historię przelewów RTGS
+curl http://localhost:8001/transfers
+```
+
+**Również w formacie XML (ISO 20022):**
+
+```bash
+curl -X POST http://localhost:8001/transfers/xml \
+  -H "Content-Type: application/xml" \
+  -d '
+<Document>
+  <CstmrCdtTrfInitn>
+
+    <PmtId>
+      <EndToEndId>RTGS-1001</EndToEndId>
+    </PmtId>
+
+    <Amt>
+      <InstdAmt Ccy="EUR">250.00</InstdAmt>
+    </Amt>
+
+    <DbtrAcct>
+      <Id>
+        <IBAN>PL61109010140000071219812874</IBAN>
+      </Id>
+    </DbtrAcct>
+
+    <CdtrAcct>
+      <Id>
+        <IBAN>DE89370400440532013000</IBAN>
+      </Id>
+    </CdtrAcct>
+
+    <DbtrAgt>
+      <FinInstnId>
+        <BIC>BANKPLPW</BIC>
+      </FinInstnId>
+    </DbtrAgt>
+
+    <CdtrAgt>
+      <FinInstnId>
+        <BIC>BANKDEXX</BIC>
+      </FinInstnId>
+    </CdtrAgt>
+
+    <RmtInf>
+      <Ustrd>XML RTGS transfer</Ustrd>
+    </RmtInf>
+
+  </CstmrCdtTrfInitn>
+</Document>'
+```
+
+**Weryfikacja XML:** Odpowiedź XML zawiera `transfer_id` (UUID) w polu `OrgnlEndToEndId` — użyj go do sprawdzenia statusu:
+
+```bash
+# Podmień {transfer_id} na UUID z odpowiedzi XML
+curl http://localhost:8001/transfers/{transfer_id}
+```
+
+---
+
+### Krok 4: SEPA Instant Transfer (rozliczenie natychmiastowe)
 
 ```bash
 curl -X POST http://localhost:8003/transfers/xml \
@@ -192,7 +292,7 @@ curl http://localhost:8001/banks/BANKDEXX
 
 ---
 
-### Krok 4: SEPA Batch Transfer (kolejkowanie)
+### Krok 5: SEPA Batch Transfer (kolejkowanie)
 
 ```bash
 curl -X POST http://localhost:8003/transfers/xml \
@@ -257,7 +357,7 @@ Odpowiedź zawiera `session_id` - zapamiętaj go.
 
 ---
 
-### Krok 5: Batch Transfer - wiele transakcji + netting
+### Krok 6: Batch Transfer - wiele transakcji + netting
 
 Dodaj więcej transferów (w obie strony dla demonstracji nettingu):
 
@@ -354,7 +454,7 @@ Zamiast 2 osobnych rozliczeń (1000 + 200), system policzy NETTO:
 
 ---
 
-### Krok 6: Zamknięcie sesji i rozliczenie
+### Krok 7: Zamknięcie sesji i rozliczenie
 
 **Opcja A - Ręcznie (natychmiast):**
 
@@ -388,7 +488,7 @@ curl http://localhost:8001/banks/BANKDEXX
 
 ---
 
-### Krok 7: Automatyczne retry (SEPA Instant)
+### Krok 8: Automatyczne retry (SEPA Instant)
 
 Jeśli przelew instant nie mógł być wykonany (brak środków), worker automatycznie:
 
@@ -414,6 +514,7 @@ curl http://localhost:8003/transfers
   - Rozliczenia brutto w czasie rzeczywistym (RTGS)
   - Blokowanie/odblokowywanie banków
   - Wstrzykiwanie płynności (liquidity injection)
+  - Przelewy RTGS bank → bank
 - **Endpointy**:
   - `GET /banks` - Lista wszystkich banków
   - `POST /banks` - Utworzenie nowego banku
@@ -421,6 +522,10 @@ curl http://localhost:8003/transfers
   - `POST /banks/unblock/{bic}` - Odblokowanie banku
   - `POST /settle/payment` - Rozliczenie płatności
   - `POST /liquidity/injection` - Wstrzyknięcie płynności
+  - `POST /transfers` - Przelew RTGS bank → bank (JSON)
+  - `POST /transfers/xml` - Przelew RTGS bank → bank (XML ISO 20022)
+  - `GET /transfers` - Lista przelewów RTGS
+  - `GET /transfers/{id}` - Status przelewu RTGS
 
 ### SEPA Batch Service (Port 8002)
 
@@ -626,6 +731,7 @@ Dotyczy:
 - `TransferRequest` (SEPA Batch)
 - `InstantTransferRequest` (SEPA Instant)
 - `LiquidityInjectionRequest` (TARGET)
+- `RtgsTransferRequest` (TARGET)
 
 ---
 
@@ -633,6 +739,7 @@ Dotyczy:
 
 | Akcja                  | Czas oczekiwania        | Co robi system automatycznie             |
 | ---------------------- | ----------------------- | ---------------------------------------- |
+| RTGS Transfer (TARGET) | ~1-2 sekundy            | NATYCHMIAST - bezpośrednie rozliczenie   |
 | SEPA Instant           | ~1-2 sekundy            | NATYCHMIAST wysyła do TARGET             |
 | SEPA Batch do kolejki  | ~1 sekunda              | Transfer przyjęty, czeka na sesję        |
 | SEPA Batch rozliczenie | **5 minut** LUB ręcznie | Worker liczy netting, wysyła do TARGET   |
