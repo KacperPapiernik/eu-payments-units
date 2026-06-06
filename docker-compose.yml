@@ -129,7 +129,7 @@ services:
       - SERVICE_CERT_PATH=/certs/sepa_batch.pem
       - SERVICE_KEY_PATH=/certs/sepa_batch.key
       - SESSION_CLOSE_INTERVAL=300
-    command: celery -A sepa_batch_service.app.workers worker -l info --pool=solo --hostname=sepa_batch_worker
+    command: celery -A sepa_batch_service.app.workers worker -B -l info --pool=solo --hostname=sepa_batch_worker
     volumes:
       - ./certs:/certs:ro
     depends_on:

@@ -36,13 +36,19 @@ async def send_to_target(
     target_url: str,
     cert_path: str,
     key_path: str,
+    sender_iban: str = None,
+    receiver_iban: str = None,
+    description: str = None,
 ):
     payload = {
         "transaction_id": transaction_id,
+        "sender_iban": sender_iban,
+        "receiver_iban": receiver_iban,
         "sender_bic": sender_bic,
         "receiver_bic": receiver_bic,
         "amount": float(amount),
         "currency": "EUR",
+        "description": description,
         "service": service,
     }
 
@@ -52,6 +58,9 @@ async def send_to_target(
                 f"{target_url}/settle/payment",
                 json=payload,
             )
+            if response.status_code >= 400:
+                data = response.json()
+                return {"error": data.get("detail", str(data))}
             return response.json()
     except Exception as e:
         return {"error": str(e)}
@@ -91,6 +100,9 @@ async def process_instant_transfer(
         target_url=settings.target_url,
         cert_path=settings.service_cert_path,
         key_path=settings.service_key_path,
+        sender_iban=transfer.sender_iban,
+        receiver_iban=transfer.receiver_iban,
+        description=transfer.description,
     )
 
     if "error" in result:

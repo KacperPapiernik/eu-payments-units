@@ -14,9 +14,16 @@ from target_service.app.schemas.settlement import (
     SettlementRequest,
     SettlementResponse,
 )
+from shared.security.iban_validator import validate_iban
 from target_service.app.services.webhook_notifier import send_webhook
 
 router = APIRouter(prefix="/settle", tags=["settlement"])
+
+
+def validate_iban_strict(iban: str, field_name: str):
+    valid, error = validate_iban(iban)
+    if not valid:
+        raise HTTPException(status_code=400, detail=f"{field_name}: {error}")
 
 
 async def get_bank_by_bic_cached(db: AsyncSession, bic: str):
@@ -33,6 +40,11 @@ async def settle_payment(
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ):
+    if payment.sender_iban:
+        validate_iban_strict(payment.sender_iban, "sender_iban")
+    if payment.receiver_iban:
+        validate_iban_strict(payment.receiver_iban, "receiver_iban")
+
     sender = await get_bank_by_bic_cached(
         db,
         payment.sender_bic
@@ -113,6 +125,8 @@ async def settle_payment(
 
     transaction = SettlementTransaction(
         transaction_id=payment.transaction_id or str(uuid.uuid4()),
+        sender_iban=payment.sender_iban,
+        receiver_iban=payment.receiver_iban,
         sender_bic=payment.sender_bic,
         receiver_bic=payment.receiver_bic,
         amount=payment.amount,
@@ -141,8 +155,8 @@ async def settle_payment(
         currency=payment.currency,
         description=payment.description,
         settled_at=transaction.settled_at,
-        sender_iban=None,
-        receiver_iban=None,
+        sender_iban=payment.sender_iban,
+        receiver_iban=payment.receiver_iban,
     )
 
     return SettlementResponse(

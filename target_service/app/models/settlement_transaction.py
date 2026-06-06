@@ -17,6 +17,8 @@ class SettlementTransaction(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     transaction_id = Column(String(100), unique=True, nullable=False, index=True)
+    sender_iban = Column(String(34), nullable=True)
+    receiver_iban = Column(String(34), nullable=True)
     sender_bic = Column(String(11), nullable=False, index=True)
     receiver_bic = Column(String(11), nullable=False, index=True)
     amount = Column(Numeric(19, 2), nullable=False)

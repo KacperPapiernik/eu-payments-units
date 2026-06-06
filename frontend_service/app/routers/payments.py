@@ -26,6 +26,8 @@ async def create_target_payment(request: Request, user: dict = Depends(require_a
     form = await request.form()
     payload = {
         "transaction_id": form.get("transaction_id", str(uuid.uuid4())[:8]),
+        "sender_iban": form.get("sender_iban"),
+        "receiver_iban": form.get("receiver_iban"),
         "sender_bic": form.get("sender_bic"),
         "receiver_bic": form.get("receiver_bic"),
         "amount": float(form.get("amount", 0)),

@@ -10,6 +10,7 @@ class RtgsTransferStatus(str, enum.Enum):
     SETTLED = "settled"
     REJECTED = "rejected"
     FAILED = "failed"
+    RECALLED = "recalled"
 
 
 class RtgsTransfer(Base):

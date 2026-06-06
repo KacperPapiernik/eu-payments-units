@@ -57,14 +57,24 @@ async def _resolve_pending():
 
                 try:
 
+                    transfer_result = await db.execute(
+                        select(InstantTransfer).where(
+                            InstantTransfer.transfer_id == pending.transfer_id
+                        )
+                    )
+                    orig = transfer_result.scalar_one_or_none()
+
                     response = await client.post(
                         f"{settings.target_url}/settle/payment",
                         json={
                             "transaction_id": pending.transfer_id,
+                            "sender_iban": orig.sender_iban if orig else None,
+                            "receiver_iban": orig.receiver_iban if orig else None,
                             "sender_bic": pending.sender_bic,
                             "receiver_bic": pending.receiver_bic,
                             "amount": float(pending.amount),
                             "currency": "EUR",
+                            "description": orig.description if orig else None,
                             "service": "sepa_instant_retry"
                         }
                     )

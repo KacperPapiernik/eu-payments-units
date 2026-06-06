@@ -270,3 +270,99 @@ async def get_transfers(db: AsyncSession = Depends(get_db)):
         }
         for t in transfers
     ]
+
+
+def build_recall_webhook_payload(transfer, event: str):
+    return {
+        "receiver_bic": transfer.receiver_bic,
+        "event": event,
+        "transfer_id": transfer.transfer_id,
+        "sender_bic": transfer.sender_bic,
+        "amount": transfer.amount,
+        "currency": transfer.currency,
+        "description": f"RECALL: {transfer.description}" if transfer.description else "RECALL",
+        "settled_at": datetime.utcnow(),
+        "sender_iban": transfer.sender_iban,
+        "receiver_iban": transfer.receiver_iban,
+    }
+
+
+@router.post("/{transfer_id}/recall")
+async def recall_transfer(
+    transfer_id: str,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(RtgsTransfer).where(RtgsTransfer.transfer_id == transfer_id)
+    )
+    transfer = result.scalar_one_or_none()
+    if not transfer:
+        raise HTTPException(status_code=404, detail="Transfer not found")
+
+    if transfer.status != RtgsTransferStatus.SETTLED:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Transfer status is {transfer.status.value}, only SETTLED transfers can be recalled"
+        )
+
+    sender_result = await db.execute(
+        select(Bank).where(Bank.bic == transfer.sender_bic)
+    )
+    sender = sender_result.scalar_one_or_none()
+    receiver_result = await db.execute(
+        select(Bank).where(Bank.bic == transfer.receiver_bic)
+    )
+    receiver = receiver_result.scalar_one_or_none()
+
+    sender_account_result = await db.execute(
+        select(SettlementAccount).where(SettlementAccount.bank_id == sender.id)
+    )
+    sender_account = sender_account_result.scalar_one_or_none()
+    receiver_account_result = await db.execute(
+        select(SettlementAccount).where(SettlementAccount.bank_id == receiver.id)
+    )
+    receiver_account = receiver_account_result.scalar_one_or_none()
+
+    if receiver_account.balance < transfer.amount:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Insufficient funds in receiver account to recall. Available: {receiver_account.balance}, Required: {transfer.amount}"
+        )
+
+    sender_account.balance += transfer.amount
+    sender_account.available_balance += transfer.amount
+    receiver_account.balance -= transfer.amount
+    receiver_account.available_balance -= transfer.amount
+
+    recall = SettlementTransaction(
+        transaction_id=f"RECALL-{transfer.transfer_id}",
+        sender_iban=transfer.receiver_iban,
+        receiver_iban=transfer.sender_iban,
+        sender_bic=transfer.receiver_bic,
+        receiver_bic=transfer.sender_bic,
+        amount=transfer.amount,
+        currency=transfer.currency,
+        status=TransactionStatus.SETTLED,
+        description=f"RECALL of {transfer.transfer_id}: {transfer.description or ''}",
+        settled_at=datetime.utcnow(),
+        service="recall",
+    )
+    db.add(recall)
+
+    transfer.status = RtgsTransferStatus.RECALLED
+
+    await db.commit()
+    await db.refresh(transfer)
+
+    background_tasks.add_task(
+        send_webhook,
+        **build_recall_webhook_payload(transfer, "transfer.recalled"),
+    )
+
+    return {
+        "transfer_id": transfer.transfer_id,
+        "status": transfer.status.value,
+        "recall_transaction_id": recall.transaction_id,
+        "recalled_at": datetime.utcnow().isoformat(),
+    }

@@ -4,97 +4,110 @@ from decimal import Decimal
 import httpx
 
 from sepa_batch_service.app.config import settings
-from sepa_batch_service.app.database import AsyncSessionLocal
+from sepa_batch_service.app.database import AsyncSessionLocal, init_db
 from sepa_batch_service.app.models.batch_session import BatchSession, SessionStatus
 from sepa_batch_service.app.models.queued_transfer import QueuedTransfer, TransferStatus
 from sepa_batch_service.app.models.netting_result import NettingResult
 from sepa_batch_service.app.workers.celery import celery_app
 
+import asyncio
+
+_loop = None
+
+
+def _get_event_loop():
+    global _loop
+    if _loop is None or _loop.is_closed():
+        _loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(_loop)
+    return _loop
+
 
 @celery_app.task(name="sepa_batch_service.app.workers.session_closer.close_session_and_settle")
 def close_session_and_settle():
-    import asyncio
-    
     async def _close_session():
+        await init_db()
         async with AsyncSessionLocal() as db:
             result = await db.execute(
                 select(BatchSession).where(BatchSession.status == SessionStatus.OPEN)
             )
-            session = result.scalar_one_or_none()
-            
-            if not session:
+            sessions = result.scalars().all()
+
+            if not sessions:
                 return {"status": "no_open_sessions"}
-            
-            transfers_result = await db.execute(
-                select(QueuedTransfer).where(
-                    QueuedTransfer.session_id == session.session_id,
-                    QueuedTransfer.status == TransferStatus.QUEUED
-                )
-            )
-            transfers = transfers_result.scalars().all()
-            
-            bank_positions = {}
-            for t in transfers:
-                sender = t.sender_bic
-                receiver = t.receiver_bic
-                amount = t.amount
-                
-                if sender not in bank_positions:
-                    bank_positions[sender] = {"credits": Decimal(0), "debits": Decimal(0)}
-                if receiver not in bank_positions:
-                    bank_positions[receiver] = {"credits": Decimal(0), "debits": Decimal(0)}
-                
-                bank_positions[sender]["debits"] += amount
-                bank_positions[receiver]["credits"] += amount
-            
-            for bank_bic, pos in bank_positions.items():
-                netting = NettingResult(
-                    session_id=session.session_id,
-                    bank_bic=bank_bic,
-                    total_credits=pos["credits"],
-                    total_debits=pos["debits"],
-                    net_position=pos["credits"] - pos["debits"]
-                )
-                db.add(netting)
-                
-                if netting.net_position != 0:
-                    # Positive position: ECB sends money to bank
-                    if netting.net_position > 0:
-                        sender_bic = "ECBCLS00XXX"
-                        receiver_bic = bank_bic
-                    # Negative position: bank sends money to ECB
-                    else:
-                        sender_bic = bank_bic
-                        receiver_bic = "ECBCLS00XXX"
-                    
-                    await send_to_target(
-                        sender_bic=sender_bic,
-                        receiver_bic=receiver_bic,
-                        amount=abs(netting.net_position),
-                        transaction_id=f"NETT-{session.session_id}-{bank_bic}",
-                        service="sepa_batch"
+
+            results = []
+            for session in sessions:
+                transfers_result = await db.execute(
+                    select(QueuedTransfer).where(
+                        QueuedTransfer.session_id == session.session_id,
+                        QueuedTransfer.status == TransferStatus.QUEUED
                     )
-            
-            await notify_individual_transfers(transfers, settings.target_url)
-            
-            for t in transfers:
-                t.status = TransferStatus.PROCESSED
-                t.processed_at = datetime.utcnow()
-            
-            session.status = SessionStatus.CLOSED
-            session.closed_at = datetime.utcnow()
-            session.total_credits = sum(p["credits"] for p in bank_positions.values())
-            session.total_debits = sum(p["debits"] for p in bank_positions.values())
-            
+                )
+                transfers = transfers_result.scalars().all()
+
+                bank_positions = {}
+                for t in transfers:
+                    sender = t.sender_bic
+                    receiver = t.receiver_bic
+                    amount = t.amount
+
+                    if sender not in bank_positions:
+                        bank_positions[sender] = {"credits": Decimal(0), "debits": Decimal(0)}
+                    if receiver not in bank_positions:
+                        bank_positions[receiver] = {"credits": Decimal(0), "debits": Decimal(0)}
+
+                    bank_positions[sender]["debits"] += amount
+                    bank_positions[receiver]["credits"] += amount
+
+                for bank_bic, pos in bank_positions.items():
+                    netting = NettingResult(
+                        session_id=session.session_id,
+                        bank_bic=bank_bic,
+                        total_credits=pos["credits"],
+                        total_debits=pos["debits"],
+                        net_position=pos["credits"] - pos["debits"]
+                    )
+                    db.add(netting)
+
+                    if netting.net_position != 0:
+                        if netting.net_position > 0:
+                            sender_bic = "ECBCLS00XXX"
+                            receiver_bic = bank_bic
+                        else:
+                            sender_bic = bank_bic
+                            receiver_bic = "ECBCLS00XXX"
+
+                        await send_to_target(
+                            sender_bic=sender_bic,
+                            receiver_bic=receiver_bic,
+                            amount=abs(netting.net_position),
+                            transaction_id=f"NETT-{session.session_id}-{bank_bic}",
+                            service="sepa_batch"
+                        )
+
+                await notify_individual_transfers(transfers, settings.target_url)
+
+                for t in transfers:
+                    t.status = TransferStatus.PROCESSED
+                    t.processed_at = datetime.utcnow()
+
+                session.status = SessionStatus.CLOSED
+                session.closed_at = datetime.utcnow()
+                session.total_credits = sum(p["credits"] for p in bank_positions.values())
+                session.total_debits = sum(p["debits"] for p in bank_positions.values())
+
+                results.append({
+                    "session_id": session.session_id,
+                    "transfers_processed": len(transfers),
+                    "banks_in_netting": len(bank_positions)
+                })
+
             await db.commit()
-            
-            return {
-                "session_id": session.session_id,
-                "transfers_processed": len(transfers),
-                "banks_in_netting": len(bank_positions)
-            }
-    
-    return asyncio.run(_close_session())
+
+            return {"sessions_closed": len(results), "details": results}
+
+    return _get_event_loop().run_until_complete(_close_session())
 
 
 async def send_to_target(sender_bic: str, receiver_bic: str, amount: Decimal, transaction_id: str, service: str):

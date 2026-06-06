@@ -6,6 +6,8 @@ from decimal import Decimal
 
 class SettlementRequest(BaseModel):
     transaction_id: str
+    sender_iban: Optional[str] = None
+    receiver_iban: Optional[str] = None
     sender_bic: str = Field(..., max_length=11)
     receiver_bic: str = Field(..., max_length=11)
     amount: Decimal = Field(..., gt=0)

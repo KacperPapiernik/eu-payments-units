@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import uuid
+import xml.etree.ElementTree as ET
 
 from sepa_batch_service.app.database import get_db
 from sepa_batch_service.app.models.batch_session import BatchSession, SessionStatus
@@ -116,5 +117,5 @@ async def submit_transfer_xml(
             media_type="application/xml",
         )
 
-    except ValueError as e:
+    except (ValueError, ET.ParseError) as e:
         raise HTTPException(status_code=400, detail=str(e))
