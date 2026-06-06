@@ -85,6 +85,8 @@ async def perform_netting(session_id: str, db: AsyncSession):
                 "settlement_result": settlement_result
             })
     
+    await notify_individual_transfers(transfers, settings.target_url)
+    
     for t in transfers:
         t.status = TransferStatus.PROCESSED
         t.processed_at = datetime.utcnow()
@@ -105,6 +107,33 @@ async def perform_netting(session_id: str, db: AsyncSession):
         },
         "netting_details": netting_details
     }
+
+
+async def notify_individual_transfers(transfers, target_url: str):
+    payload = {
+        "transfers": [
+            {
+                "transfer_id": t.transfer_id,
+                "sender_bic": t.sender_bic,
+                "receiver_bic": t.receiver_bic,
+                "sender_iban": t.sender_iban,
+                "receiver_iban": t.receiver_iban,
+                "amount": float(t.amount),
+                "currency": t.currency,
+                "description": t.description,
+            }
+            for t in transfers
+        ]
+    }
+    try:
+        async with httpx.AsyncClient(verify=False, timeout=30.0) as client:
+            response = await client.post(
+                f"{target_url}/notify/batch-transfers",
+                json=payload,
+            )
+            response.raise_for_status()
+    except Exception as e:
+        print(f"Failed to notify individual transfers: {e}")
 
 
 async def send_to_target(sender_bic: str, receiver_bic: str, amount: Decimal, transaction_id: str, service: str):
