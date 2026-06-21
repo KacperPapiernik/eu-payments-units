@@ -209,7 +209,7 @@ async def _check_alerts():
             )
         )
 
-        alerts = alerts.scalars().all()
+        alerts = alerts_result.scalars().all()
 
         two_hours_ago = (
             datetime.utcnow() - timedelta(hours=2)

@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 import uuid
 
 from target_service.app.database import get_db
@@ -24,7 +25,9 @@ async def liquidity_injection(
     account_result = await db.execute(
         select(SettlementAccount).where(SettlementAccount.bank_id == bank.id)
     )
-    account = account_result.scalar_one()
+    account = account_result.scalar_one_or_none()
+    if not account:
+        raise HTTPException(status_code=404, detail="Settlement account not found for this bank")
     
     account.balance += request.amount
     account.available_balance += request.amount
@@ -37,9 +40,13 @@ async def liquidity_injection(
         settled="completed"
     )
     db.add(transfer)
-    
-    await db.commit()
-    await db.refresh(account)
+
+    try:
+        await db.commit()
+        await db.refresh(account)
+    except SQLAlchemyError as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error during liquidity injection: {str(e)}")
     
     return LiquidityInjectionResponse(
         transfer_id=transfer.transfer_id,

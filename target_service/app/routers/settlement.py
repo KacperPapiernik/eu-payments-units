@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from datetime import datetime
 import uuid
 
@@ -139,11 +140,14 @@ async def settle_payment(
 
     db.add(transaction)
 
-    await db.commit()
-
-    await db.refresh(transaction)
-    await db.refresh(sender_account)
-    await db.refresh(receiver_account)
+    try:
+        await db.commit()
+        await db.refresh(transaction)
+        await db.refresh(sender_account)
+        await db.refresh(receiver_account)
+    except SQLAlchemyError as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error during settlement: {str(e)}")
 
     background_tasks.add_task(
         send_webhook,

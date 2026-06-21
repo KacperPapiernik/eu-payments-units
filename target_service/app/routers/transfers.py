@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Body, Response, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from datetime import datetime
 from xml.etree import ElementTree as ET
 import uuid
@@ -141,8 +142,12 @@ async def process_rtgs_transfer(
     rtgs_transfer.status = RtgsTransferStatus.SETTLED
     rtgs_transfer.processed_at = datetime.utcnow()
 
-    await db.commit()
-    await db.refresh(rtgs_transfer)
+    try:
+        await db.commit()
+        await db.refresh(rtgs_transfer)
+    except SQLAlchemyError as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error processing transfer: {str(e)}")
 
     background_tasks.add_task(
         send_webhook,
@@ -352,8 +357,12 @@ async def recall_transfer(
 
     transfer.status = RtgsTransferStatus.RECALLED
 
-    await db.commit()
-    await db.refresh(transfer)
+    try:
+        await db.commit()
+        await db.refresh(transfer)
+    except SQLAlchemyError as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error during recall: {str(e)}")
 
     background_tasks.add_task(
         send_webhook,
