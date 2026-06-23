@@ -156,7 +156,7 @@ services:
       - CA_CERT_PATH=/certs/ca.pem
       - SERVICE_CERT_PATH=/certs/sepa_instant.pem
       - SERVICE_KEY_PATH=/certs/sepa_instant.key
-    command: celery -A sepa_instant_service.app.workers worker -l info --pool=solo --hostname=sepa_instant_worker
+    command: celery -A sepa_instant_service.app.workers worker -B -l info --pool=solo --hostname=sepa_instant_worker
     volumes:
       - ./certs:/certs:ro
     depends_on:

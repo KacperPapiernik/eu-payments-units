@@ -30,7 +30,7 @@ async def login(request: Request):
             {"request": request, "error": "Nieprawidłowa nazwa użytkownika lub hasło"},
             status_code=401,
         )
-    token = create_token(username, user_data["role"], user_data["name"])
+    token = create_token(username, user_data["role"], user_data["name"], user_data.get("bank_bic"))
     response = RedirectResponse(url="/", status_code=303)
     response.set_cookie(
         key=AUTH_COOKIE,

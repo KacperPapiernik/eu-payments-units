@@ -5,16 +5,16 @@ from shared.security.jwt_handler import JWTHandler
 from frontend_service.app.config import settings
 
 USERS = {
-    "admin": {"password": "admin123", "role": "admin", "name": "Administrator"},
-    "operator": {"password": "operator123", "role": "operator", "name": "Operator Rozliczeniowy"},
+    "admin": {"password": "admin123", "role": "admin", "name": "Administrator", "bank_bic": None},
+    "operator": {"password": "operator123", "role": "operator", "name": "Operator Rozliczeniowy", "bank_bic": None},
 }
 
 jwt_handler = JWTHandler(secret_key=settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 
-def create_token(username: str, role: str, name: str) -> str:
+def create_token(username: str, role: str, name: str, bank_bic: str = None) -> str:
     return jwt_handler.create_token(
-        {"sub": username, "role": role, "name": name},
+        {"sub": username, "role": role, "name": name, "bank_bic": bank_bic},
         expires_delta=timedelta(minutes=settings.jwt_expire_minutes),
     )
 
@@ -38,6 +38,7 @@ def get_current_user(request: Request) -> Optional[dict]:
         "username": payload.get("sub"),
         "role": payload.get("role"),
         "name": payload.get("name"),
+        "bank_bic": payload.get("bank_bic"),
     }
 
 

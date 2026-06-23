@@ -4,11 +4,19 @@ Symulacja europejskiej infrastruktury płatności obejmującej TARGET (RTGS), SE
 
 ## Pierwsze kroki
 
-### 1. Generowanie certyfikatów
+### 1. Generowanie certyfikatów i testy
 
 ```bash
 python -m pip install cryptography
 python certs/generate_certs.py
+```
+
+Testy:
+
+```bash
+  docker-compose up -d
+  pip install pytest pytest-asyncio httpx
+  pytest test_all.py -v --asyncio-mode=auto
 ```
 
 ### 2. Uruchomienie serwisów

@@ -72,6 +72,20 @@
           <dt class="col-sm-5">Limit debetu</dt>
           <dd class="col-sm-7">€{{ "%.2f"|format(acc.limit_debt|float) }}</dd>
         </dl>
+        <hr class="border-secondary">
+        <form hx-post="/banks/{{ bank.bic }}/limit-debt" hx-target="#detail-limit-result" class="row g-2 align-items-end">
+          <div class="col-auto flex-grow-1">
+            <label class="small text-secondary">Zmień limit debetu:</label>
+            <input type="number" name="limit_debt" step="0.01" min="0" value="{{ acc.limit_debt|float }}" class="form-control form-control-sm" required>
+          </div>
+          <div class="col-auto">
+            <label class="small text-secondary">&nbsp;</label>
+            <button type="submit" class="btn btn-sm btn-primary">
+              <i class="bi bi-check-lg me-1"></i>Zapisz
+            </button>
+          </div>
+        </form>
+        <div id="detail-limit-result" class="mt-2"></div>
         {% else %}
         <p class="text-secondary mb-0">Brak konta rozliczeniowego</p>
         {% endif %}

@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from frontend_service.app.config import settings
 from frontend_service.app.clients import clients
 from frontend_service.app.auth import get_current_user, AUTH_COOKIE, PUBLIC_PATHS
-from frontend_service.app.routers import web, banks, payments, batch, liquidity
+from frontend_service.app.routers import web, banks, payments, batch, liquidity, emergency
 
 
 @asynccontextmanager
@@ -47,6 +47,7 @@ app.include_router(banks.router)
 app.include_router(payments.router)
 app.include_router(batch.router)
 app.include_router(liquidity.router)
+app.include_router(emergency.router)
 
 
 if __name__ == "__main__":

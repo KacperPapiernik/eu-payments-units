@@ -52,3 +52,34 @@ async def alerts_page(request: Request, user: dict = Depends(require_auth)):
     return templates.TemplateResponse("liquidity/alerts.html", {
         "request": request, "user": user, "transfers": transfers
     })
+
+
+@router.get("/check", response_class=HTMLResponse)
+async def check_alerts(request: Request, user: dict = Depends(require_auth)):
+    try:
+        r = await clients.instant.get("/transfers")
+        transfers = r.json() if isinstance(r.json(), list) else []
+    except Exception:
+        transfers = []
+
+    bank_bic = user.get("bank_bic")
+    if bank_bic:
+        pending = [t for t in transfers if t.get("status") in ("pending",) and t.get("sender_bic") == bank_bic]
+    else:
+        pending = [t for t in transfers if t.get("status") in ("pending",)]
+
+    if not pending:
+        return HTMLResponse("")
+
+    msg = "Alert płynnościowy: " + "; ".join(
+        f"{t['sender_bic']} → €{t['amount']}" for t in pending[:3]
+    )
+    if len(pending) > 3:
+        msg += f" (+{len(pending)-3} więcej)"
+
+    return HTMLResponse(
+        f'<div id="liquidity-popup" class="alert alert-danger alert-dismissible fade show position-fixed top-0 start-50 translate-middle-x mt-5 z-3" role="alert" style="max-width:600px">'
+        f'<strong><i class="bi bi-exclamation-triangle-fill me-2"></i>{msg}</strong>'
+        f'<button type="button" class="btn-close" data-bs-dismiss="alert"></button>'
+        f'</div>'
+    )

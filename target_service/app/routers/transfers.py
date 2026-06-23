@@ -95,13 +95,15 @@ async def process_rtgs_transfer(
         )
 
     available = sender_account.available_balance
-    if available < transfer.amount:
+    limit = sender_account.limit_debt
+    if available + limit < transfer.amount:
+        deficit = transfer.amount - (available + limit)
         raise HTTPException(
             status_code=400,
             detail=(
-                f"Insufficient funds. "
-                f"Available: {available}, "
-                f"Required: {transfer.amount}"
+                f"Insufficient funds (with limit_debt). "
+                f"Available: {available}, Limit: {limit}, "
+                f"Required: {transfer.amount}, Deficit: {deficit}"
             )
         )
 

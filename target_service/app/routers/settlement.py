@@ -46,6 +46,22 @@ async def settle_payment(
     if payment.receiver_iban:
         validate_iban_strict(payment.receiver_iban, "receiver_iban")
 
+    if payment.transaction_id:
+        existing = await db.execute(
+            select(SettlementTransaction).where(
+                SettlementTransaction.transaction_id == payment.transaction_id
+            )
+        )
+        existing_tx = existing.scalar_one_or_none()
+        if existing_tx and existing_tx.status == TransactionStatus.SETTLED:
+            return SettlementResponse(
+                transaction_id=existing_tx.transaction_id,
+                status="settled",
+                settled_at=existing_tx.settled_at,
+                sender_balance=existing_tx.amount,
+                receiver_balance=existing_tx.amount,
+            )
+
     sender = await get_bank_by_bic_cached(
         db,
         payment.sender_bic
@@ -107,14 +123,16 @@ async def settle_payment(
         )
 
     available = sender_account.available_balance
+    limit = sender_account.limit_debt
 
-    if available < payment.amount:
+    if available + limit < payment.amount:
+        deficit = payment.amount - (available + limit)
         raise HTTPException(
             status_code=400,
             detail=(
-                f"Insufficient funds. "
-                f"Available: {available}, "
-                f"Required: {payment.amount}"
+                f"Insufficient funds (with limit_debt). "
+                f"Available: {available}, Limit: {limit}, "
+                f"Required: {payment.amount}, Deficit: {deficit}"
             )
         )
 

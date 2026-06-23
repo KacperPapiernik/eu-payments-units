@@ -5,6 +5,7 @@ from typing import List
 from datetime import datetime
 from decimal import Decimal
 import httpx
+import json
 
 from sepa_batch_service.app.database import get_db
 from sepa_batch_service.app.models.batch_session import BatchSession, SessionStatus
@@ -46,6 +47,7 @@ async def perform_netting(session_id: str, db: AsyncSession):
     settlements_sent = 0
     total_amount = Decimal(0)
     netting_details = []
+    blocked_banks = []
     
     from sepa_batch_service.app.config import settings
     
@@ -60,11 +62,9 @@ async def perform_netting(session_id: str, db: AsyncSession):
         db.add(netting)
         
         if netting.net_position != 0:
-            # Positive position: ECB sends money to bank
             if netting.net_position > 0:
                 sender_bic = "ECBCLS00XXX"
                 receiver_bic = bank_bic
-            # Negative position: bank sends money to ECB
             else:
                 sender_bic = bank_bic
                 receiver_bic = "ECBCLS00XXX"
@@ -77,6 +77,17 @@ async def perform_netting(session_id: str, db: AsyncSession):
                 service="sepa_batch"
             )
             
+            if netting.net_position < 0 and settlement_result.get("status") == "error":
+                print(f"[NETTING] Settlement failed for {bank_bic}, blocking bank")
+                try:
+                    async with httpx.AsyncClient(verify=False, timeout=15.0) as block_client:
+                        await block_client.post(
+                            f"{settings.target_url}/banks/block/{bank_bic}"
+                        )
+                    blocked_banks.append(bank_bic)
+                except Exception:
+                    print(f"[NETTING] Failed to block {bank_bic} as well")
+            
             settlements_sent += 1
             total_amount += abs(netting.net_position)
             netting_details.append({
@@ -86,17 +97,25 @@ async def perform_netting(session_id: str, db: AsyncSession):
             })
     
     await notify_individual_transfers(transfers, settings.target_url)
-    
+
+    await notify_session_report(
+        session_id=session_id,
+        status="settled",
+        bank_positions=bank_positions,
+        target_url=settings.target_url,
+    )
+
     for t in transfers:
         t.status = TransferStatus.PROCESSED
         t.processed_at = datetime.utcnow()
-    
+
     await db.commit()
     
     return {
         "transfers_processed": len(transfers),
         "settlements_sent": settlements_sent,
         "total_amount": float(total_amount),
+        "blocked_banks": blocked_banks,
         "bank_positions": {
             bic: {
                 "credits": float(pos["credits"]),
@@ -134,6 +153,32 @@ async def notify_individual_transfers(transfers, target_url: str):
             response.raise_for_status()
     except Exception as e:
         print(f"Failed to notify individual transfers: {e}")
+
+
+async def notify_session_report(session_id: str, status: str, bank_positions: dict, target_url: str):
+    banks = [
+        {
+            "bank_bic": bic,
+            "total_credits": float(pos["credits"]),
+            "total_debits": float(pos["debits"]),
+            "net_position": float(pos["credits"] - pos["debits"]),
+        }
+        for bic, pos in bank_positions.items()
+    ]
+    payload = {
+        "session_id": session_id,
+        "status": status,
+        "total_transactions": len(banks),
+        "banks": banks,
+    }
+    try:
+        async with httpx.AsyncClient(verify=False, timeout=15.0) as client:
+            await client.post(
+                f"{target_url}/notify/session-report",
+                json=payload,
+            )
+    except Exception as e:
+        print(f"Failed to notify session report: {e}")
 
 
 async def send_to_target(sender_bic: str, receiver_bic: str, amount: Decimal, transaction_id: str, service: str):
@@ -209,6 +254,57 @@ async def get_session(session_id: str, db: AsyncSession = Depends(get_db)):
             }
             for n in netting
         ]
+    }
+
+
+@router.get("/{session_id}/position/{bank_bic}")
+async def get_bank_position(session_id: str, bank_bic: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(BatchSession).where(BatchSession.session_id == session_id)
+    )
+    session = result.scalar_one_or_none()
+    if not session:
+        return {"error": "Session not found"}
+
+    transfers_result = await db.execute(
+        select(QueuedTransfer).where(
+            QueuedTransfer.session_id == session_id,
+            QueuedTransfer.status == TransferStatus.QUEUED
+        )
+    )
+    transfers = transfers_result.scalars().all()
+
+    credits = Decimal(0)
+    debits = Decimal(0)
+    transfer_list = []
+
+    for t in transfers:
+        if t.receiver_bic == bank_bic:
+            credits += t.amount
+            transfer_list.append({
+                "direction": "incoming",
+                "from": t.sender_bic,
+                "amount": float(t.amount),
+            })
+        if t.sender_bic == bank_bic:
+            debits += t.amount
+            transfer_list.append({
+                "direction": "outgoing",
+                "to": t.receiver_bic,
+                "amount": float(t.amount),
+            })
+
+    net_position = credits - debits
+
+    return {
+        "session_id": session_id,
+        "session_status": session.status.value,
+        "bank_bic": bank_bic,
+        "total_credits": float(credits),
+        "total_debits": float(debits),
+        "net_position": float(net_position),
+        "transaction_count": len(transfer_list),
+        "transfers": transfer_list,
     }
 
 

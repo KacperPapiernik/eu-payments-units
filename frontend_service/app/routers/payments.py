@@ -102,7 +102,12 @@ async def create_instant_transfer(request: Request, user: dict = Depends(require
 
 
 @router.get("/history", response_class=HTMLResponse)
-async def payment_history(request: Request, user: dict = Depends(require_auth)):
+async def payment_history(
+    request: Request,
+    user: dict = Depends(require_auth),
+    from_date: str = None,
+    to_date: str = None,
+):
     instant_transfers = []
     batch_sessions = []
     try:
@@ -115,8 +120,18 @@ async def payment_history(request: Request, user: dict = Depends(require_auth)):
         batch_sessions = r.json() if isinstance(r.json(), list) else []
     except Exception:
         pass
+
+    if from_date:
+        instant_transfers = [t for t in instant_transfers if t.get("created_at", "")[:10] >= from_date]
+        batch_sessions = [s for s in batch_sessions if s.get("opened_at", "")[:10] >= from_date]
+    if to_date:
+        instant_transfers = [t for t in instant_transfers if t.get("created_at", "")[:10] <= to_date]
+        batch_sessions = [s for s in batch_sessions if s.get("opened_at", "")[:10] <= to_date]
+
     return templates.TemplateResponse("payments/history.html", {
         "request": request, "user": user,
         "instant_transfers": instant_transfers,
         "batch_sessions": batch_sessions,
+        "from_date": from_date,
+        "to_date": to_date,
     })

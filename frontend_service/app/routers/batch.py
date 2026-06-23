@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Request, Depends
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from frontend_service.app.template_engine import templates
 from frontend_service.app.auth import require_auth
 from frontend_service.app.clients import clients
@@ -23,9 +23,15 @@ async def session_list(request: Request, user: dict = Depends(require_auth)):
 @router.get("/{session_id}", response_class=HTMLResponse)
 async def session_detail(request: Request, session_id: str, user: dict = Depends(require_auth)):
     session = None
+    banks = []
     try:
         r = await clients.batch.get(f"/sessions/{session_id}")
         session = r.json()
+    except Exception:
+        pass
+    try:
+        r = await clients.target.get("/banks")
+        banks = r.json() if isinstance(r.json(), list) else []
     except Exception:
         pass
     if not session:
@@ -34,7 +40,7 @@ async def session_detail(request: Request, session_id: str, user: dict = Depends
             "error": f"Sesja {session_id} nie znaleziona"
         })
     return templates.TemplateResponse("batch/session_detail.html", {
-        "request": request, "user": user, "session": session
+        "request": request, "user": user, "session": session, "banks": banks
     })
 
 
@@ -50,6 +56,16 @@ async def close_session(request: Request, session_id: str, user: dict = Depends(
     except Exception as e:
         msg = f'<div class="alert alert-danger">Błąd: {str(e)}</div>'
     return HTMLResponse(msg)
+
+
+@router.get("/{session_id}/position/{bank_bic}")
+async def bank_position(request: Request, session_id: str, bank_bic: str, user: dict = Depends(require_auth)):
+    try:
+        r = await clients.batch.get(f"/sessions/{session_id}/position/{bank_bic}")
+        data = r.json()
+        return JSONResponse(data)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=502)
 
 
 @router.get("/{session_id}/visualize")

@@ -60,6 +60,8 @@ def close_session_and_settle():
                     bank_positions[sender]["debits"] += amount
                     bank_positions[receiver]["credits"] += amount
 
+                blocked_banks = []
+
                 for bank_bic, pos in bank_positions.items():
                     netting = NettingResult(
                         session_id=session.session_id,
@@ -78,7 +80,7 @@ def close_session_and_settle():
                             sender_bic = bank_bic
                             receiver_bic = "ECBCLS00XXX"
 
-                        await send_to_target(
+                        result = await send_to_target(
                             sender_bic=sender_bic,
                             receiver_bic=receiver_bic,
                             amount=abs(netting.net_position),
@@ -86,7 +88,26 @@ def close_session_and_settle():
                             service="sepa_batch"
                         )
 
+                        if isinstance(result, dict) and "error" in result:
+                            print(f"[NETTING] Settlement failed for {bank_bic}, blocking bank")
+                            try:
+                                async with httpx.AsyncClient() as block_client:
+                                    await block_client.post(
+                                        f"{settings.target_url}/banks/block/{bank_bic}",
+                                        timeout=15.0
+                                    )
+                                blocked_banks.append(bank_bic)
+                            except Exception:
+                                print(f"[NETTING] Failed to block {bank_bic} as well")
+
                 await notify_individual_transfers(transfers, settings.target_url)
+
+                await notify_session_report(
+                    session_id=session.session_id,
+                    status="settled",
+                    bank_positions=bank_positions,
+                    target_url=settings.target_url,
+                )
 
                 for t in transfers:
                     t.status = TransferStatus.PROCESSED
@@ -174,6 +195,32 @@ async def notify_individual_transfers(transfers, target_url: str):
             response.raise_for_status()
     except Exception as e:
         print(f"Failed to notify individual transfers: {e}")
+
+
+async def notify_session_report(session_id: str, status: str, bank_positions: dict, target_url: str):
+    banks = [
+        {
+            "bank_bic": bic,
+            "total_credits": float(pos["credits"]),
+            "total_debits": float(pos["debits"]),
+            "net_position": float(pos["credits"] - pos["debits"]),
+        }
+        for bic, pos in bank_positions.items()
+    ]
+    payload = {
+        "session_id": session_id,
+        "status": status,
+        "total_transactions": len(banks),
+        "banks": banks,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            await client.post(
+                f"{target_url}/notify/session-report",
+                json=payload,
+            )
+    except Exception as e:
+        print(f"Failed to notify session report: {e}")
 
 
 @celery_app.task(name="sepa_batch_service.app.workers.session_closer.periodic_session_close")

@@ -16,3 +16,17 @@ class BatchTransferItem(BaseModel):
 
 class BatchTransferNotification(BaseModel):
     transfers: List[BatchTransferItem]
+
+
+class SessionReportItem(BaseModel):
+    bank_bic: str = Field(..., max_length=11)
+    total_credits: Decimal
+    total_debits: Decimal
+    net_position: Decimal
+
+
+class SessionReportNotification(BaseModel):
+    session_id: str = Field(..., max_length=36)
+    status: str
+    total_transactions: int
+    banks: List[SessionReportItem]
