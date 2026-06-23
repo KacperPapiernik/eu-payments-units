@@ -8,6 +8,23 @@ from frontend_service.app.clients import clients
 router = APIRouter(prefix="/payments", tags=["payments"])
 
 
+async def _check_sender_balance(bic: str, amount: float) -> str | None:
+    try:
+        r = await clients.target.get(f"/banks/{bic}")
+        if r.status_code != 200:
+            return "Nie znaleziono banku nadawcy"
+        bank = r.json()
+        acct = bank["settlement_accounts"][0]
+        available = float(acct["available_balance"])
+        limit = float(acct["limit_debt"])
+        total = available + limit
+        if total < amount:
+            return f"Niewystarczające środki (dostępne: €{total:.2f}, wymagane: €{amount:.2f})"
+        return None
+    except Exception as e:
+        return f"Błąd sprawdzania salda: {e}"
+
+
 @router.get("/new", response_class=HTMLResponse)
 async def new_payment(request: Request, user: dict = Depends(require_auth)):
     banks = []
@@ -24,6 +41,9 @@ async def new_payment(request: Request, user: dict = Depends(require_auth)):
 @router.post("/target")
 async def create_target_payment(request: Request, user: dict = Depends(require_auth)):
     form = await request.form()
+    err = await _check_sender_balance(form.get("sender_bic"), float(form.get("amount", 0)))
+    if err:
+        return HTMLResponse(f'<div class="alert alert-danger">{err}</div>')
     payload = {
         "transaction_id": form.get("transaction_id", str(uuid.uuid4())[:16]),
         "sender_iban": form.get("sender_iban"),
@@ -50,6 +70,9 @@ async def create_target_payment(request: Request, user: dict = Depends(require_a
 @router.post("/batch")
 async def create_batch_transfer(request: Request, user: dict = Depends(require_auth)):
     form = await request.form()
+    err = await _check_sender_balance(form.get("sender_bic"), float(form.get("amount", 0)))
+    if err:
+        return HTMLResponse(f'<div class="alert alert-danger">{err}</div>')
     payload = {
         "transfer_id": str(uuid.uuid4()),
         "sender_iban": form.get("sender_iban"),
@@ -76,6 +99,9 @@ async def create_batch_transfer(request: Request, user: dict = Depends(require_a
 @router.post("/instant")
 async def create_instant_transfer(request: Request, user: dict = Depends(require_auth)):
     form = await request.form()
+    err = await _check_sender_balance(form.get("sender_bic"), float(form.get("amount", 0)))
+    if err:
+        return HTMLResponse(f'<div class="alert alert-danger">{err}</div>')
     payload = {
         "transfer_id": str(uuid.uuid4()),
         "sender_iban": form.get("sender_iban"),

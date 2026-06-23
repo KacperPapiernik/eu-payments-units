@@ -144,7 +144,6 @@ async def _resolve_pending_gridlock():
             .where(
                 PendingTransferQueue.resolved_at == None,
                 PendingTransferQueue.retry_count < MAX_RETRIES,
-                PendingTransferQueue.next_retry_at <= now,
             )
             .order_by(PendingTransferQueue.created_at)
         )
@@ -306,8 +305,6 @@ async def _resolve_pending_gridlock():
             stuck = [x for x in pending_list if x.id not in resolved_ids]
             for p in stuck:
                 p.retry_count += 1
-                delay = min(p.retry_count * 2, 30)
-                p.next_retry_at = now + timedelta(minutes=delay)
 
             await db.commit()
 
